@@ -18,8 +18,9 @@ Related project (shared WiFi stack origin): `crowPanelWeather/5.79-inch-E-ink-da
 
 ```
 src/display/
-  ├── wind_widget.cpp/h       ← Wind dial, SOG bar, AWS/TWS pills
-  ├── placeholder_screen.cpp/h ← Dummy screens (navigation placeholders)
+  ├── wind_widget.cpp/h       ← Wind dial, AWS/TWS pills
+  ├── sog_speedometer_screen.cpp/h ← SOG dial (screen 2)
+  ├── energy_flow_screen.cpp/h ← Energy hub diagram (screen 3)
   ├── user_screens.cpp/h      ← Screen registry, nav state, draw wrappers
   └── display_manager.cpp/h   ← Status screens, connection badge, dispatch
 
@@ -74,7 +75,13 @@ Current subscriptions:
 | `environment.wind.speedTrue` | TWS fallback |
 | `environment.wind.directionTrue` | TWD |
 | `navigation.headingTrue` | Bow-relative TWD dial |
-| `navigation.speedOverGround` | SOG bar graph |
+| `navigation.speedOverGround` | SOG speedometer |
+| `electrical.solar.0.power` | Victron A — fixed solar (W) |
+| `electrical.consumption.0.power` | Victron A — boat load (W) |
+| `electrical.solar.1.power` | Victron B — portable solar (W) |
+| `electrical.consumption.1.power` | Victron B — fridge load (W) |
+| `electrical.batteries.0.power` | Ecoworthy LiFePO — charge/discharge (W) |
+| `electrical.batteries.0.capacity.stateOfCharge` | Ecoworthy LiFePO — SOC |
 
 ---
 
@@ -92,9 +99,10 @@ HomePuck-specific serial debug: [docs/wifi_debug.md](docs/wifi_debug.md) (`DEBUG
 
 - **User screens** stay visible during SignalK reconnect; badge shows `SK...` / `No SK` (not full-screen status).
 - **Touch navigation** (CST816S, `touch.disable_auto_sleep()` required):
-  - Swipe **left/right** — cycle screen modes (Wind → SOG → Screen 3 → Wind)
+  - Swipe **left/right** — cycle screen modes (Wind → SOG → Energy → Wind)
   - Swipe **up/down** — cycle variations within current screen (Wind: AWS/TWS)
 - **SOG speedometer** on screen 2 — 0–15 kts colour dial, amber VU peak marker (10 s decay)
+- **Energy flow** on screen 3 — hub-and-spoke diagram (HA-style): fixed/portable solar → battery → boat/fridge loads; demo animation until SignalK paths live
 - **Dirty-check** in `display_manager` skips redraw when values unchanged; SOG peak decay forces periodic updates.
 
 ### Adding screens or variations

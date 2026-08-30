@@ -19,7 +19,9 @@ class DisplayManager {
 public:
     void begin();
     void showStatus(DisplayConnectionState state, const char* detail = "");
-    void updateUserScreen(const WindData& wind, bool stale, DisplayConnectionState connState);
+    void updateUserScreen(const WindData& wind, bool wind_stale,
+                          const EnergyData& energy, bool energy_stale,
+                          DisplayConnectionState connState);
     void navigateMode(int delta);
     void navigateVariation(int delta);
     bool isUserScreenActive() const { return _userScreenActive; }
@@ -37,7 +39,8 @@ private:
     DisplayConnectionState _lastConnState = DISPLAY_CONN_BOOT;
     void drawHeader(const char* title, uint16_t color);
     void drawConnectionBadge(DisplayConnectionState connState);
-    bool userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool stale,
+    bool userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
+                               const EnergyData& energy, bool energy_stale,
                                DisplayConnectionState connState);
 };
 

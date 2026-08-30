@@ -31,9 +31,11 @@ static DisplayConnectionState mapConnectionState() {
 
 static void updateUserDisplay() {
     WindData wind = signalkClient.getWindData();
+    EnergyData energy = signalkClient.getEnergyData();
     DisplayConnectionState conn = mapConnectionState();
-    bool stale = signalkClient.isWindDataStale();
-    displayManager.updateUserScreen(wind, stale, conn);
+    bool wind_stale = signalkClient.isWindDataStale();
+    bool energy_stale = signalkClient.isEnergyDataStale();
+    displayManager.updateUserScreen(wind, wind_stale, energy, energy_stale, conn);
 }
 
 static void onWiFiStateChange(WiFiConnectionState state, const char* message) {

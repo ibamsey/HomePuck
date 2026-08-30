@@ -24,7 +24,7 @@ Screen modes (←→) and variations (↑↓)
 
 | Gesture | Action |
 |---------|--------|
-| Swipe left | Next screen: Wind → SOG → Screen 3 → Wind |
+| Swipe left | Next screen: Wind → SOG → Energy → Wind |
 | Swipe right | Previous screen (reverse) |
 | Swipe up | Next variation within current screen |
 | Swipe down | Previous variation within current screen |
@@ -57,6 +57,7 @@ HomePuck/
 | AWA pointer | White triangle |
 | TWD pointer | Cyan triangle (+ white outline) |
 | SOG speedometer (screen 2) | Colour arc 0–15 kts; white needle; amber VU peak (10 s decay) |
+| Energy flow (screen 3) | HA-style hub diagram: fixed/portable solar, battery SOC, boat + fridge loads |
 | Connection badge | Bottom centre: OK / SK... / No SK / WiFi |
 
 Bow-up dial: 0° = top, clockwise positive. Scale arc 30°–330°.

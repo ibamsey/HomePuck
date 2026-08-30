@@ -2,7 +2,7 @@
 #include "config.h"
 #include "wind_widget.h"
 #include "sog_speedometer_screen.h"
-#include "placeholder_screen.h"
+#include "energy_flow_screen.h"
 #include <math.h>
 
 static WindWidget s_windWidget;
@@ -42,12 +42,15 @@ static bool windScreenDataChanged(const WindData& wind, bool stale, uint8_t vari
     return windWidgetDataChanged(s_windDisplay, next);
 }
 
-bool userScreenDataChanged(UserScreenMode mode, const WindData& wind, bool stale, uint8_t variation) {
+bool userScreenDataChanged(UserScreenMode mode, const WindData& wind, bool wind_stale,
+                           const EnergyData& energy, bool energy_stale, uint8_t variation) {
     switch (mode) {
         case USER_SCREEN_WIND:
-            return windScreenDataChanged(wind, stale, variation);
+            return windScreenDataChanged(wind, wind_stale, variation);
         case USER_SCREEN_SOG:
-            return sogSpeedometerDataChanged(wind, stale);
+            return sogSpeedometerDataChanged(wind, wind_stale);
+        case USER_SCREEN_ENERGY:
+            return energyFlowDataChanged(energy, energy_stale);
         default:
             return false;
     }
@@ -66,14 +69,15 @@ static void drawSogSpeedometer(const UserScreenDrawContext& ctx) {
     sogSpeedometerScreenDraw(ctx.display, *ctx.wind, ctx.wind_stale, ctx.now_ms);
 }
 
-static void drawPlaceholderB(const UserScreenDrawContext& ctx) {
-    placeholderScreenDraw(ctx.display, USER_SCREEN_PLACEHOLDER_B, ctx.variation);
+static void drawEnergyFlow(const UserScreenDrawContext& ctx) {
+    if (!ctx.energy) return;
+    energyFlowScreenDraw(ctx.display, *ctx.energy, ctx.energy_stale, ctx.now_ms);
 }
 
 static const UserScreenDescriptor kUserScreens[] = {
-    { USER_SCREEN_WIND,          "Wind", USER_SCREEN_WIND_VARIATIONS,         true,  drawWindScreen },
-    { USER_SCREEN_SOG,           "SOG",  USER_SCREEN_SOG_VARIATIONS,          true,  drawSogSpeedometer },
-    { USER_SCREEN_PLACEHOLDER_B, "Scr3", USER_SCREEN_PLACEHOLDER_VARIATIONS,  false, drawPlaceholderB },
+    { USER_SCREEN_WIND,   "Wind",   USER_SCREEN_WIND_VARIATIONS,   true,  false, drawWindScreen },
+    { USER_SCREEN_SOG,    "SOG",    USER_SCREEN_SOG_VARIATIONS,    true,  false, drawSogSpeedometer },
+    { USER_SCREEN_ENERGY, "Energy", USER_SCREEN_ENERGY_VARIATIONS, false, true,  drawEnergyFlow },
 };
 
 static const size_t kUserScreenCount = sizeof(kUserScreens) / sizeof(kUserScreens[0]);

@@ -58,6 +58,12 @@ bool SignalKClient::begin() {
     _subscribed_paths.push_back("environment.wind.directionTrue");
     _subscribed_paths.push_back("navigation.headingTrue");
     _subscribed_paths.push_back("navigation.speedOverGround");
+    _subscribed_paths.push_back(SK_PATH_VICTRON_A_SOLAR);
+    _subscribed_paths.push_back(SK_PATH_VICTRON_A_LOAD);
+    _subscribed_paths.push_back(SK_PATH_VICTRON_B_SOLAR);
+    _subscribed_paths.push_back(SK_PATH_VICTRON_B_LOAD);
+    _subscribed_paths.push_back(SK_PATH_BATTERY_POWER);
+    _subscribed_paths.push_back(SK_PATH_BATTERY_SOC);
 
     Serial.printf("[SIGNALK] %d paths subscribed\n", (int)_subscribed_paths.size());
     return true;
@@ -190,6 +196,20 @@ bool SignalKClient::isWindDataStale() const {
     return (millis() - _wind.last_update) > SIGNALK_DATA_STALE_THRESHOLD_MS;
 }
 
+EnergyData SignalKClient::getEnergyData() {
+    EnergyData copy;
+    if (xSemaphoreTake(_data_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        copy = _energy;
+        xSemaphoreGive(_data_mutex);
+    }
+    return copy;
+}
+
+bool SignalKClient::isEnergyDataStale() const {
+    if (_energy.last_update == 0) return true;
+    return (millis() - _energy.last_update) > SIGNALK_DATA_STALE_THRESHOLD_MS;
+}
+
 void SignalKClient::_staticEventHandler(void* handler_args, esp_event_base_t base,
                                         int32_t event_id, void* event_data) {
     SignalKClient* self = static_cast<SignalKClient*>(handler_args);
@@ -279,41 +299,42 @@ void SignalKClient::_processDeltaMessage(JsonArray updates) {
                 continue;
             }
 
-            _storeWindValue(path, value.as<float>());
+            _storePathValue(path, value.as<float>());
         }
     }
 }
 
-void SignalKClient::_storeWindValue(const char* path, float value) {
+void SignalKClient::_storePathValue(const char* path, float value) {
     if (xSemaphoreTake(_data_mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
         return;
     }
 
+    unsigned long now = millis();
+
     if (strcmp(path, "environment.wind.speedApparent") == 0) {
         _wind.aws_knots = value * MS_TO_KNOTS;
         _wind.aws_valid = true;
-        _wind.last_update = millis();
+        _wind.last_update = now;
     } else if (strcmp(path, "environment.wind.speedOverGround") == 0) {
         _wind.tws_knots = value * MS_TO_KNOTS;
         _wind.tws_valid = true;
-        _wind.last_update = millis();
+        _wind.last_update = now;
     } else if (strcmp(path, "environment.wind.speedTrue") == 0) {
         if (!_wind.tws_valid) {
             _wind.tws_knots = value * MS_TO_KNOTS;
             _wind.tws_valid = true;
-            _wind.last_update = millis();
+            _wind.last_update = now;
         }
     } else if (strcmp(path, "environment.wind.angleApparent") == 0) {
         _wind.awa_degrees = normalizeAngle(value * RAD_TO_DEG_F);
         _wind.awa_valid = true;
-        _wind.last_update = millis();
+        _wind.last_update = now;
     } else if (strcmp(path, "environment.wind.directionTrue") == 0) {
         _wind.twd_degrees = normalizeAngle(value * RAD_TO_DEG_F);
         _wind.twd_valid = true;
-        _wind.last_update = millis();
+        _wind.last_update = now;
 #if DEBUG_SIGNALK
         static unsigned long last_twd_log = 0;
-        unsigned long now = millis();
         if (now - last_twd_log > 5000) {
             Serial.printf("[SIGNALK] TWD=%.0f deg (dial=%.0f)\n", _wind.twd_degrees, _wind.twdDialDegrees());
             last_twd_log = now;
@@ -322,11 +343,35 @@ void SignalKClient::_storeWindValue(const char* path, float value) {
     } else if (strcmp(path, "navigation.headingTrue") == 0) {
         _wind.heading_degrees = normalizeAngle(value * RAD_TO_DEG_F);
         _wind.heading_valid = true;
-        _wind.last_update = millis();
+        _wind.last_update = now;
     } else if (strcmp(path, "navigation.speedOverGround") == 0) {
         _wind.sog_knots = value * MS_TO_KNOTS;
         _wind.sog_valid = true;
-        _wind.last_update = millis();
+        _wind.last_update = now;
+    } else if (strcmp(path, SK_PATH_VICTRON_A_SOLAR) == 0) {
+        _energy.fixed_solar_w = value;
+        _energy.fixed_solar_valid = true;
+        _energy.last_update = now;
+    } else if (strcmp(path, SK_PATH_VICTRON_A_LOAD) == 0) {
+        _energy.boat_load_w = value;
+        _energy.boat_load_valid = true;
+        _energy.last_update = now;
+    } else if (strcmp(path, SK_PATH_VICTRON_B_SOLAR) == 0) {
+        _energy.portable_solar_w = value;
+        _energy.portable_solar_valid = true;
+        _energy.last_update = now;
+    } else if (strcmp(path, SK_PATH_VICTRON_B_LOAD) == 0) {
+        _energy.fridge_load_w = value;
+        _energy.fridge_load_valid = true;
+        _energy.last_update = now;
+    } else if (strcmp(path, SK_PATH_BATTERY_POWER) == 0) {
+        _energy.battery_power_w = value;
+        _energy.battery_power_valid = true;
+        _energy.last_update = now;
+    } else if (strcmp(path, SK_PATH_BATTERY_SOC) == 0) {
+        _energy.battery_soc_pct = (value <= 1.0f) ? value * 100.0f : value;
+        _energy.battery_soc_valid = true;
+        _energy.last_update = now;
     }
 
     xSemaphoreGive(_data_mutex);
@@ -337,7 +382,7 @@ void SignalKClient::_sendSubscription() {
         return;
     }
 
-    StaticJsonDocument<1024> doc;
+    StaticJsonDocument<1536> doc;
     doc["context"] = "vessels.self";
 
     JsonArray subscribe = doc["subscribe"].to<JsonArray>();
@@ -348,7 +393,7 @@ void SignalKClient::_sendSubscription() {
         sub["minPeriod"] = SIGNALK_MIN_SUBSCRIPTION_PERIOD_MS;
     }
 
-    char json[768];
+    char json[1024];
     size_t len = serializeJson(doc, json, sizeof(json));
     if (len == 0) {
         Serial.println("[SIGNALK] ERROR: Subscription JSON serialize failed");

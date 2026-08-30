@@ -10,6 +10,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include "config.h"
+#include "energy_data.h"
 
 enum SignalKState {
     SK_DISCONNECTED = 0,
@@ -93,6 +94,8 @@ public:
 
     WindData getWindData();
     bool isWindDataStale() const;
+    EnergyData getEnergyData();
+    bool isEnergyDataStale() const;
 
     void onDataReceived(SignalKDataCallback cb) { _data_callback = cb; }
     void onStateChange(SignalKStateCallback cb) { _state_callback = cb; }
@@ -116,6 +119,7 @@ private:
     std::vector<String> _subscribed_paths;
     SemaphoreHandle_t _data_mutex;
     WindData _wind;
+    EnergyData _energy;
 
     SignalKDataCallback _data_callback;
     SignalKStateCallback _state_callback;
@@ -131,7 +135,7 @@ private:
     void _handleReconnection();
     void _handleErrorRecovery();
     void _checkConnectionHealth();
-    void _storeWindValue(const char* path, float value);
+    void _storePathValue(const char* path, float value);
 
     static void _staticEventHandler(void* handler_args, esp_event_base_t base,
                                     int32_t event_id, void* event_data);

@@ -100,27 +100,31 @@ void DisplayManager::showStatus(DisplayConnectionState state, const char* detail
     }
 }
 
-bool DisplayManager::userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool stale,
+bool DisplayManager::userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
+                                           const EnergyData& energy, bool energy_stale,
                                            DisplayConnectionState connState) {
     if (_forceRedraw) return true;
     if (_lastMode != _nav.mode) return true;
     if (_lastVariation != _nav.variation[_nav.mode]) return true;
     if (_lastConnState != connState) return true;
 
-    if (desc && desc->needs_wind_data) {
-        return userScreenDataChanged(_nav.mode, wind, stale, _nav.variation[_nav.mode]);
+    if (desc && (desc->needs_wind_data || desc->needs_energy_data)) {
+        return userScreenDataChanged(_nav.mode, wind, wind_stale, energy, energy_stale,
+                                     _nav.variation[_nav.mode]);
     }
 
     return false;
 }
 
-void DisplayManager::updateUserScreen(const WindData& wind, bool stale, DisplayConnectionState connState) {
+void DisplayManager::updateUserScreen(const WindData& wind, bool wind_stale,
+                                      const EnergyData& energy, bool energy_stale,
+                                      DisplayConnectionState connState) {
     if (!_ready) return;
 
     const UserScreenDescriptor* desc = _nav.currentDescriptor();
     if (!desc) return;
 
-    if (_userScreenActive && !userScreenNeedsRedraw(desc, wind, stale, connState)) {
+    if (_userScreenActive && !userScreenNeedsRedraw(desc, wind, wind_stale, energy, energy_stale, connState)) {
         return;
     }
 
@@ -129,7 +133,9 @@ void DisplayManager::updateUserScreen(const WindData& wind, bool stale, DisplayC
     UserScreenDrawContext ctx = {
         display,
         desc->needs_wind_data ? &wind : nullptr,
-        stale,
+        wind_stale,
+        desc->needs_energy_data ? &energy : nullptr,
+        energy_stale,
         _nav.variation[desc->mode],
         millis()
     };

@@ -51,8 +51,10 @@ Gestures are disabled until `DisplayManager::isUserScreenActive()` is true (same
 | `src/display/user_screens.cpp` | Navigation | `kUserScreens[]` registry, cycle helpers, draw wrappers |
 | `include/display_manager.h` | Orchestration | Status vs user routing, dirty-check, badge overlay |
 | `src/display/display_manager.cpp` | Orchestration | Registry dispatch via `updateUserScreen()` |
-| `src/display/wind_widget.cpp` | Render | Wind dial, SOG bar, AWS/TWS pills |
-| `src/display/placeholder_screen.cpp` | Render | Dummy screens for navigation testing |
+| `src/display/wind_widget.cpp` | Render | Wind dial, AWS/TWS pills |
+| `src/display/sog_speedometer_screen.cpp` | Render | SOG dial |
+| `src/display/energy_flow_screen.cpp` | Render | Energy hub diagram |
+| `include/energy_data.h` | Data | SignalK path constants + `EnergyData` struct |
 | `include/config.h` | Config | Per-screen variation counts, debounce interval |
 
 **Never edit for UI features:** `src/ui/` (excluded from build — EEZ/LVGL artifacts).
@@ -146,7 +148,7 @@ Maintain this table when adding or replacing screens:
 |------|------------|------------|------------|---------------|--------|
 | `USER_SCREEN_WIND` | Wind | 2 (AWS/TWS) | yes | `wind_widget.cpp` | live |
 | `USER_SCREEN_SOG` | SOG | 1 | yes | `sog_speedometer_screen.cpp` | live |
-| `USER_SCREEN_PLACEHOLDER_B` | Scr3 | 2 | no | `placeholder_screen.cpp` | placeholder |
+| `USER_SCREEN_ENERGY` | Energy | 1 | energy | `energy_flow_screen.cpp` | live |
 
 ---
 
@@ -175,7 +177,24 @@ Maintain this table when adding or replacing screens:
 
 ---
 
-## Example walkthrough: replace placeholder A with SOG stats
+## Energy flow screen (screen 3)
+
+Home Assistant [Power Flow Card Plus](https://github.com/flixlix/power-flow-card-plus) inspired layout: **battery hub** centre, solar sources upper corners, loads lower corners. Animated flow lines show watts; line weight scales with power.
+
+SignalK paths (defined in `include/energy_data.h`):
+
+| Source | Path | Field |
+|--------|------|-------|
+| Victron A | `electrical.solar.0.power` | Fixed solar (W) |
+| Victron A | `electrical.consumption.0.power` | Boat load (W) |
+| Victron B | `electrical.solar.1.power` | Portable solar (W) |
+| Victron B | `electrical.consumption.1.power` | Fridge load (W) |
+| Ecoworthy BMS | `electrical.batteries.0.power` | Battery ±W (+ charge) |
+| Ecoworthy BMS | `electrical.batteries.0.capacity.stateOfCharge` | SOC (0–1 or %) |
+
+When no energy data is received, `ENERGY_FLOW_DEMO_WHEN_STALE` in `config.h` enables an animated demo labelled **DEMO**.
+
+---
 
 Goal: swap `USER_SCREEN_PLACEHOLDER_A` for a screen showing SOG max/avg.
 
