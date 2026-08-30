@@ -11,7 +11,7 @@ HomePuck has two display layers:
 1. **Status screens** — transient full-screen boot/WiFi/SignalK messages (`DisplayManager::showStatus()`). Gestures are disabled.
 2. **User screens** — persistent instrument UI once first data renders. Swipe navigation applies here.
 
-### Three-layer stack
+### Four-layer stack
 
 ```
 Input (main.cpp)
@@ -21,10 +21,13 @@ Navigation (user_screens.cpp)
     │ UserScreenNav state + kUserScreens[] registry
     ▼
 Orchestration (display_manager.cpp)
-    │ updateUserScreen(), dirty-check, connection badge
+    │ classifyUpdate(), badge-only path, compositor dispatch
     ▼
-Render (wind_widget.cpp, placeholder_screen.cpp, …)
-    │ LovyanGFX draw per screen module
+Compositor (display_compositor.cpp)
+    │ DisplayStaticLayer (shared 115 KB sprite), beginFrame/endFrame, badge strip
+    ▼
+Render (wind_widget.cpp, sog_speedometer_screen.cpp, energy_flow_screen.cpp)
+    │ Full vs Partial draw per screen module
 ```
 
 ### Gesture model
@@ -49,7 +52,10 @@ Gestures are disabled until `DisplayManager::isUserScreenActive()` is true (same
 | `src/main.cpp` | Input | CST816S init, gesture debounce, calls `navigateMode` / `navigateVariation` |
 | `include/user_screens.h` | Navigation | `UserScreenMode` enum, `UserScreenNav`, descriptor types |
 | `src/display/user_screens.cpp` | Navigation | `kUserScreens[]` registry, cycle helpers, draw wrappers |
-| `include/display_manager.h` | Orchestration | Status vs user routing, dirty-check, badge overlay |
+| `include/display_connection.h` | Types | `DisplayConnectionState` enum (shared by manager + compositor) |
+| `include/display_compositor.h` | Compositor | `DisplayUpdateKind`, `DisplayStaticLayer`, badge strip helpers |
+| `src/display/display_compositor.cpp` | Compositor | Shared sprite pool, `patchRect`, frame batching |
+| `include/display_manager.h` | Orchestration | Status vs user routing, update classification |
 | `src/display/display_manager.cpp` | Orchestration | Registry dispatch via `updateUserScreen()` |
 | `src/display/wind_widget.cpp` | Render | Wind dial, AWS/TWS pills |
 | `src/display/sog_speedometer_screen.cpp` | Render | SOG dial |
@@ -66,13 +72,24 @@ Gestures are disabled until `DisplayManager::isUserScreenActive()` is true (same
 All user screens register in `kUserScreens[]` inside [`src/display/user_screens.cpp`](../src/display/user_screens.cpp). This is the **primary extension point**.
 
 ```cpp
+enum class DisplayUpdateKind : uint8_t {
+    None,       // skip frame
+    Full,       // first paint, screen/mode switch, _forceRedraw
+    Partial,    // data delta within current screen
+    BadgeOnly,  // connection strip only
+};
+
 struct UserScreenDrawContext {
     LGFX& display;
+    DisplayUpdateKind update_kind;
     const WindData* wind;   // nullptr when needs_wind_data == false
     bool wind_stale;
+    const EnergyData* energy;
+    bool energy_stale;
     uint8_t variation;      // opaque index for current screen
     unsigned long now_ms;
 };
+```
 
 struct UserScreenDescriptor {
     UserScreenMode mode;
@@ -106,23 +123,60 @@ Define named constants in the screen's own header (`wind_widget.h`, `placeholder
 
 ---
 
-## Dirty-check rules
+## Dirty-check and update classification
 
-`DisplayManager` skips redraw when nothing changed (WiFi-safe — reduces SPI traffic in the 500 ms loop).
+`DisplayManager::classifyUpdate()` decides whether to skip, full-redraw, partial-update, or badge-only refresh.
 
 Global checks (all screens):
 
-- `_forceRedraw` — set on every navigation gesture
-- `_lastMode != _nav.mode`
-- `_lastVariation != _nav.variation[_nav.mode]`
-- `_lastConnState != connState`
+- `_forceRedraw` — set on every navigation gesture → **Full**
+- `_lastMode != _nav.mode` → **Full** (invalidates shared static sprite)
+- `_lastVariation != _nav.variation[_nav.mode]` → **Full**
+- Connection badge visibility/state change only → **BadgeOnly** (no instrument redraw)
 
 Screen-specific checks:
 
-- Wind (`needs_wind_data == true`): `userScreenWindDataChanged()` in `user_screens.cpp` compares wind field deltas and SOG peak decay
-- Placeholder: global checks suffice (static content)
+- Wind / SOG / Energy: `userScreenDataChanged()` → **Partial** when only data changed
 
-Rule: **navigation always sets `_forceRedraw = true`**. The periodic loop relies on dirty-check otherwise.
+Rule: **navigation always sets `_forceRedraw = true`**. The periodic loop relies on classification otherwise.
+
+### Connection badge overlay
+
+The bottom strip (y=210–239) shows status **only when something needs attention**:
+
+| State | Badge text |
+|-------|------------|
+| WiFi + SignalK OK | *(blank — strip cleared)* |
+| SignalK connecting | `SK...` (amber) |
+| SignalK lost | `No SK` (amber) |
+| WiFi lost | `WiFi` (red) |
+
+Boot/status screens (`showStatus()`) are unchanged — full-screen "WiFi OK" / "SignalK OK" messages during connect.
+
+---
+
+## Compositor contract (partial refresh)
+
+All user screens share one **`DisplayStaticLayer`** (~115 KB RGB565 sprite). Only one screen owns the buffer at a time; switching screens rebuilds static content on **Full** draw.
+
+Each screen module implements:
+
+1. **`buildStatic(sprite)`** — draw immovable chrome (rings, labels, tracks) into the shared sprite
+2. **`draw(..., DisplayUpdateKind kind, ...)`** — branch on `Full` vs `Partial`:
+   - **Full**: build static → `pushFull()` → draw all dynamic elements
+   - **Partial**: `patchRect()` dirty regions from static → redraw only changed dynamic elements
+
+Frame batching: `displayCompositor().beginFrame()` / `endFrame()` wraps every panel update in `startWrite()` / `endWrite()`.
+
+### Checklist: add a new screen with partial refresh
+
+1. Follow the [add a new screen mode](#checklist-add-a-new-screen-mode) steps below
+2. Implement `buildStatic(LGFX_Sprite&)` for immovable layout
+3. Accept `DisplayUpdateKind` in the draw function; never call `fillScreen()` on partial path
+4. Cache last-drawn dynamic state; compute dirty bounding boxes for partial patches
+5. Call `displayStaticLayer().ensure(display, USER_SCREEN_XXX)` and `markReady()` after building static
+6. On partial updates, use `displayStaticLayer().patchRect()` before redraw
+7. Test: data updates should not flash the full frame; screen swipe should full-paint once
 
 ---
 
@@ -132,11 +186,11 @@ ESP32-C3 has **no PSRAM**. Steady-state free heap is ~80–95 KB after connect.
 
 | Allocation | Size | When |
 |------------|------|------|
-| Wind static sprite | ~115 KB | `WindWidget::ensureStatic()` — one instance only |
-| Placeholder screens | 0 extra | Direct draw to framebuffer |
-| New screen with sprite | ~115 KB+ | Avoid unless replacing wind screen; prefer direct draw |
+| Shared static sprite | ~115 KB | `DisplayStaticLayer::ensure()` — one instance, reused across screens |
+| Per-screen owned sprite | 0 | All screens use shared pool |
+| Second full framebuffer | not allowed | Would OOM |
 
-Before adding a large sprite, check `ESP.getFreeHeap()` after connect. See [AGENTS.md](../AGENTS.md) RAM budget table.
+Before adding large allocations, check `ESP.getFreeHeap()` after connect. See [AGENTS.md](../AGENTS.md) RAM budget table.
 
 ---
 
@@ -227,7 +281,9 @@ Touch handler and `UserScreenNav` cycle logic require **no changes**.
 | Monolithic `switch` in `display_manager.cpp` | Use registry; keeps orchestration screen-agnostic |
 | LVGL / `src/ui/` edits | Excluded from build; regenerated by EEZ |
 | Extra 115 KB sprite without heap check | OOM on ESP32-C3; may break WiFi/SignalK |
-| Full-screen status on SK reconnect | User screens stay visible; badge only (see AGENTS.md) |
+| Full-screen status on SK reconnect | User screens stay visible; badge strip only (see connection badge table above) |
+| Per-screen owned 115 KB sprite | Use shared `DisplayStaticLayer` pool |
+| `fillScreen()` on partial data update | Gate clears behind `DisplayUpdateKind::Full` only |
 
 ---
 

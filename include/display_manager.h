@@ -4,16 +4,7 @@
 #include <Arduino.h>
 #include "signalk_client.h"
 #include "user_screens.h"
-
-enum DisplayConnectionState {
-    DISPLAY_CONN_BOOT,
-    DISPLAY_CONN_WIFI_CONNECTING,
-    DISPLAY_CONN_WIFI_OK,
-    DISPLAY_CONN_SIGNALK_CONNECTING,
-    DISPLAY_CONN_SIGNALK_OK,
-    DISPLAY_CONN_SIGNALK_LOST,
-    DISPLAY_CONN_WIFI_LOST
-};
+#include "display_connection.h"
 
 class DisplayManager {
 public:
@@ -37,13 +28,16 @@ private:
     UserScreenMode _lastMode = USER_SCREEN_WIND;
     uint8_t _lastVariation = 0;
     DisplayConnectionState _lastConnState = DISPLAY_CONN_BOOT;
+    bool _lastBadgeVisible = false;
+
     void drawHeader(const char* title, uint16_t color);
-    void drawConnectionBadge(DisplayConnectionState connState);
-    bool userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
-                               const EnergyData& energy, bool energy_stale,
-                               DisplayConnectionState connState);
+    DisplayUpdateKind classifyUpdate(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
+                                     const EnergyData& energy, bool energy_stale,
+                                     DisplayConnectionState connState);
 };
 
 extern DisplayManager displayManager;
+
+LGFX& displayManagerPanel();
 
 #endif // DISPLAY_MANAGER_H

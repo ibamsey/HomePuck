@@ -6,6 +6,13 @@
 #include "signalk_client.h"
 #include "energy_data.h"
 
+enum class DisplayUpdateKind : uint8_t {
+    None = 0,
+    Full,
+    Partial,
+    BadgeOnly,
+};
+
 enum UserScreenMode : uint8_t {
     USER_SCREEN_WIND = 0,
     USER_SCREEN_SOG,
@@ -15,6 +22,7 @@ enum UserScreenMode : uint8_t {
 
 struct UserScreenDrawContext {
     LGFX& display;
+    DisplayUpdateKind update_kind;
     const WindData* wind;
     bool wind_stale;
     const EnergyData* energy;

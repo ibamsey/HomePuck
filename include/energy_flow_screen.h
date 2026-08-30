@@ -4,8 +4,10 @@
 #include <Arduino.h>
 #include "LGFX_config.h"
 #include "energy_data.h"
+#include "user_screens.h"
 
-void energyFlowScreenDraw(LGFX& display, const EnergyData& energy, bool stale, unsigned long now_ms);
+void energyFlowScreenDraw(LGFX& display, DisplayUpdateKind kind, const EnergyData& energy, bool stale,
+                          unsigned long now_ms);
 bool energyFlowDataChanged(const EnergyData& energy, bool stale);
 
 #endif // ENERGY_FLOW_SCREEN_H

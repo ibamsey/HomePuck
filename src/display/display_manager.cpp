@@ -1,4 +1,5 @@
 #include "display_manager.h"
+#include "display_compositor.h"
 #include "LGFX_config.h"
 #include "config.h"
 
@@ -13,6 +14,10 @@ static const uint16_t C_RED = 0xF800;
 static const uint16_t C_CYAN = 0x07FF;
 
 static LGFX display;
+
+LGFX& displayManagerPanel() {
+    return display;
+}
 
 void DisplayManager::begin() {
     display.init();
@@ -29,29 +34,11 @@ void DisplayManager::drawHeader(const char* title, uint16_t color) {
     display.drawString(title, DISPLAY_WIDTH / 2, 18);
 }
 
-void DisplayManager::drawConnectionBadge(DisplayConnectionState connState) {
-    const char* status = "OK";
-    uint16_t status_color = C_GREEN;
-
-    if (connState == DISPLAY_CONN_WIFI_LOST) {
-        status = "WiFi";
-        status_color = C_RED;
-    } else if (connState == DISPLAY_CONN_SIGNALK_LOST || connState == DISPLAY_CONN_SIGNALK_CONNECTING) {
-        status = connState == DISPLAY_CONN_SIGNALK_CONNECTING ? "SK..." : "No SK";
-        status_color = C_AMBER;
-    }
-
-    display.setTextSize(1);
-    display.setTextColor(status_color, C_BG);
-    display.setTextDatum(TC_DATUM);
-    display.drawString(status, DISPLAY_WIDTH / 2, 222);
-    display.setTextSize(2);
-}
-
 void DisplayManager::showStatus(DisplayConnectionState state, const char* detail) {
     if (!_ready) return;
 
     _userScreenActive = false;
+    displayStaticLayer().invalidate();
     display.fillScreen(C_BG);
     display.drawCircle(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 112, C_GREY);
 
@@ -100,20 +87,32 @@ void DisplayManager::showStatus(DisplayConnectionState state, const char* detail
     }
 }
 
-bool DisplayManager::userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
-                                           const EnergyData& energy, bool energy_stale,
-                                           DisplayConnectionState connState) {
-    if (_forceRedraw) return true;
-    if (_lastMode != _nav.mode) return true;
-    if (_lastVariation != _nav.variation[_nav.mode]) return true;
-    if (_lastConnState != connState) return true;
+DisplayUpdateKind DisplayManager::classifyUpdate(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
+                                                 const EnergyData& energy, bool energy_stale,
+                                                 DisplayConnectionState connState) {
+    bool badgeVisible = connectionBadgeVisible(connState);
+    bool needsBadge = (_lastConnState != connState) || (_lastBadgeVisible != badgeVisible);
 
+    bool needsFull = !_userScreenActive || _forceRedraw ||
+                     (_lastMode != _nav.mode) ||
+                     (_lastVariation != _nav.variation[_nav.mode]);
+
+    bool needsPartial = false;
     if (desc && (desc->needs_wind_data || desc->needs_energy_data)) {
-        return userScreenDataChanged(_nav.mode, wind, wind_stale, energy, energy_stale,
-                                     _nav.variation[_nav.mode]);
+        needsPartial = userScreenDataChanged(_nav.mode, wind, wind_stale, energy, energy_stale,
+                                             _nav.variation[_nav.mode]);
     }
 
-    return false;
+    if (!needsFull && !needsPartial && !needsBadge) {
+        return DisplayUpdateKind::None;
+    }
+    if (!needsFull && !needsPartial && needsBadge) {
+        return DisplayUpdateKind::BadgeOnly;
+    }
+    if (needsFull) {
+        return DisplayUpdateKind::Full;
+    }
+    return DisplayUpdateKind::Partial;
 }
 
 void DisplayManager::updateUserScreen(const WindData& wind, bool wind_stale,
@@ -124,14 +123,36 @@ void DisplayManager::updateUserScreen(const WindData& wind, bool wind_stale,
     const UserScreenDescriptor* desc = _nav.currentDescriptor();
     if (!desc) return;
 
-    if (_userScreenActive && !userScreenNeedsRedraw(desc, wind, wind_stale, energy, energy_stale, connState)) {
+    DisplayUpdateKind kind = classifyUpdate(desc, wind, wind_stale, energy, energy_stale, connState);
+    if (kind == DisplayUpdateKind::None) {
         return;
+    }
+
+    bool badgeVisible = connectionBadgeVisible(connState);
+
+    if (kind == DisplayUpdateKind::BadgeOnly) {
+        displayCompositor().beginFrame(display);
+        displayCompositor().drawConnectionBadge(display, connState, _lastBadgeVisible);
+        displayCompositor().endFrame(display);
+        _lastConnState = connState;
+        _lastBadgeVisible = badgeVisible;
+        return;
+    }
+
+    if (_lastMode != _nav.mode) {
+        displayStaticLayer().invalidate();
     }
 
     _forceRedraw = false;
 
+#if DEBUG_DISPLAY
+    unsigned long frame_start = micros();
+#endif
+    displayCompositor().beginFrame(display);
+
     UserScreenDrawContext ctx = {
         display,
+        kind,
         desc->needs_wind_data ? &wind : nullptr,
         wind_stale,
         desc->needs_energy_data ? &energy : nullptr,
@@ -141,12 +162,19 @@ void DisplayManager::updateUserScreen(const WindData& wind, bool wind_stale,
     };
 
     desc->draw(ctx);
-    drawConnectionBadge(connState);
+    displayCompositor().drawConnectionBadge(display, connState, _lastBadgeVisible);
+    displayCompositor().endFrame(display);
+
+#if DEBUG_DISPLAY
+    Serial.printf("[Display] kind=%u screen=%s us=%lu\n",
+                  (unsigned)kind, desc->debug_name, micros() - frame_start);
+#endif
 
     _userScreenActive = true;
     _lastMode = _nav.mode;
     _lastVariation = _nav.variation[_nav.mode];
     _lastConnState = connState;
+    _lastBadgeVisible = badgeVisible;
 }
 
 void DisplayManager::navigateMode(int delta) {

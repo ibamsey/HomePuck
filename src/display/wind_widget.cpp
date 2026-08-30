@@ -1,5 +1,7 @@
 #include "wind_widget.h"
+#include "display_compositor.h"
 #include <math.h>
+#include <string.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -15,11 +17,12 @@ static const int16_t CX = WIND_WIDGET_CENTER_X;
 static const int16_t CY = WIND_WIDGET_CENTER_Y;
 static const int16_t OUTER_R = WIND_WIDGET_OUTER_RADIUS;
 static const int16_t INNER_R = WIND_WIDGET_INNER_RADIUS;
-
-WindWidget::~WindWidget() {
-    delete _staticLayer;
-    _staticLayer = nullptr;
-}
+static const int16_t MODE_LABEL_Y = 158;
+static const int16_t MODE_LABEL_PATCH_X = CX - 22;
+static const int16_t MODE_LABEL_PATCH_Y = 152;
+static const int16_t MODE_LABEL_PATCH_W = 44;
+static const int16_t MODE_LABEL_PATCH_H = 14;
+static const int16_t PATCH_MARGIN = 4;
 
 float WindWidget::normalizeAngle(float angle) {
     while (angle < 0.0f) angle += 360.0f;
@@ -33,21 +36,49 @@ void WindWidget::ourAngleToPoint(int16_t cx, int16_t cy, int16_t radius, float o
     y = cy - (int16_t)(sinf(rad) * radius);
 }
 
-void WindWidget::ensureStatic(LGFX& display) {
-    if (_staticReady) return;
+void WindWidget::pointerBounds(float angle, int16_t width, bool large,
+                               int16_t& minX, int16_t& minY, int16_t& maxX, int16_t& maxY) const {
+    angle = normalizeAngle(angle);
+    int16_t tipR = large ? (INNER_R - 28) : (INNER_R - 12);
+    int16_t baseR = large ? (OUTER_R - 1) : (OUTER_R + 3);
 
-    if (_staticLayer == nullptr) {
-        _staticLayer = new lgfx::LGFX_Sprite(&display);
-    }
-    if (_staticLayer->getBuffer() == nullptr) {
-        _staticLayer->createSprite(WIND_WIDGET_SIZE, WIND_WIDGET_SIZE);
+    int16_t tipX, tipY;
+    ourAngleToPoint(CX, CY, tipR, angle, tipX, tipY);
+
+    float rad = (90.0f - angle) * (float)M_PI / 180.0f;
+    float halfWidthAngle = atanf((float)width / 2.0f / (float)baseR);
+
+    int16_t blX = CX + (int16_t)(cosf(rad + halfWidthAngle) * baseR);
+    int16_t blY = CY - (int16_t)(sinf(rad + halfWidthAngle) * baseR);
+    int16_t brX = CX + (int16_t)(cosf(rad - halfWidthAngle) * baseR);
+    int16_t brY = CY - (int16_t)(sinf(rad - halfWidthAngle) * baseR);
+
+    minX = tipX;
+    maxX = tipX;
+    minY = tipY;
+    maxY = tipY;
+
+    int16_t xs[] = {tipX, blX, brX, CX};
+    int16_t ys[] = {tipY, blY, brY, CY};
+    for (int i = 0; i < 4; i++) {
+        if (xs[i] < minX) minX = xs[i];
+        if (xs[i] > maxX) maxX = xs[i];
+        if (ys[i] < minY) minY = ys[i];
+        if (ys[i] > maxY) maxY = ys[i];
     }
 
-    _staticLayer->fillScreen(C_BG);
-    drawScale(*_staticLayer);
-    drawNoGoLines(*_staticLayer);
-    drawBoat(*_staticLayer);
-    _staticReady = true;
+    minX -= PATCH_MARGIN;
+    minY -= PATCH_MARGIN;
+    maxX += PATCH_MARGIN;
+    maxY += PATCH_MARGIN;
+}
+
+void WindWidget::patchPointerRegion(LGFX& display, float angle, int16_t width, bool large, bool valid) {
+    if (!valid) return;
+
+    int16_t minX, minY, maxX, maxY;
+    pointerBounds(angle, width, large, minX, minY, maxX, maxY);
+    displayStaticLayer().patchRect(display, minX, minY, maxX - minX + 1, maxY - minY + 1);
 }
 
 void WindWidget::drawTick(lgfx::LovyanGFX& gfx, int16_t angle, bool major) {
@@ -159,7 +190,14 @@ void WindWidget::drawNoGoLines(lgfx::LovyanGFX& gfx) {
     }
 }
 
-void WindWidget::drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data) {
+void WindWidget::buildStatic(lgfx::LGFX_Sprite& sprite) {
+    sprite.fillScreen(C_BG);
+    drawScale(sprite);
+    drawNoGoLines(sprite);
+    drawBoat(sprite);
+}
+
+void WindWidget::drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data, bool restoreFromStatic) {
     float speed = data.show_tws ? data.tws_knots : data.aws_knots;
 
     char speedBuf[16];
@@ -169,7 +207,11 @@ void WindWidget::drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data) {
         snprintf(speedBuf, sizeof(speedBuf), "--.-");
     }
 
-    gfx.fillRect(CX - 58, CY - 18, 116, 48, C_BG);
+    if (restoreFromStatic) {
+        displayStaticLayer().patchRect(static_cast<LGFX&>(gfx), CX - 58, CY - 18, 116, 48);
+    } else {
+        gfx.fillRect(CX - 58, CY - 18, 116, 48, C_BG);
+    }
 
     gfx.setTextDatum(MC_DATUM);
     gfx.setTextSize(3);
@@ -182,48 +224,139 @@ void WindWidget::drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data) {
 }
 
 void WindWidget::drawModeIndicator(lgfx::LovyanGFX& gfx, bool show_tws) {
-    const int16_t y = 196;
-    const int16_t pillW = 38;
-    const int16_t pillH = 18;
-
-    auto drawPill = [&](const char* label, int16_t cx, bool active) {
-        int16_t x = cx - pillW / 2;
-        int16_t y0 = y - pillH / 2;
-        if (active) {
-            gfx.fillRoundRect(x, y0, pillW, pillH, 4, C_CYAN);
-            gfx.setTextColor(C_BG, C_CYAN);
-        } else {
-            gfx.drawRoundRect(x, y0, pillW, pillH, 4, C_GREY);
-            gfx.setTextColor(C_GREY, C_BG);
-        }
-        gfx.setTextSize(1);
-        gfx.setTextDatum(MC_DATUM);
-        gfx.drawString(label, cx, y + 1);
-    };
-
-    drawPill("AWS", CX - 24, !show_tws);
-    drawPill("TWS", CX + 24, show_tws);
+    gfx.setTextSize(1);
+    gfx.setTextDatum(TC_DATUM);
+    gfx.setTextColor(C_CYAN, C_BG);
+    gfx.drawString(show_tws ? "TWS" : "AWS", CX, MODE_LABEL_Y);
 }
 
-void WindWidget::drawDynamic(LGFX& display, const WindWidgetData& data) {
-    _staticLayer->pushSprite(&display, 0, 0);
-
+void WindWidget::drawDynamicFull(LGFX& display, const WindWidgetData& data) {
     if (data.awa_valid) {
         drawPointer(display, data.awa_degrees, 20, C_WHITE, C_WHITE, false);
     }
     if (data.twd_valid) {
-        // Smaller cyan triangle with white outline (matches e-ink TWD style)
         drawPointer(display, data.twd_degrees, 14, C_CYAN, C_WHITE, false);
         drawPointer(display, data.twd_degrees, 14, C_CYAN, C_WHITE, true);
     }
-
-    drawCenter(display, data);
+    drawCenter(display, data, false);
     drawModeIndicator(display, data.show_tws);
 }
 
-void WindWidget::draw(LGFX& display, const WindWidgetData& data) {
-    ensureStatic(display);
-    drawDynamic(display, data);
+void WindWidget::resetCache(const WindWidgetData& data) {
+    _cacheValid = true;
+    _lastAwa = data.awa_degrees;
+    _lastTwd = data.twd_degrees;
+    _lastAwaValid = data.awa_valid;
+    _lastTwdValid = data.twd_valid;
+    _lastSpeedValid = data.speed_valid;
+    _lastShowTws = data.show_tws;
+    _lastSpeed = data.show_tws ? data.tws_knots : data.aws_knots;
+}
+
+void WindWidget::drawDynamicPartial(LGFX& display, const WindWidgetData& data) {
+    bool awaChanged = data.awa_valid != _lastAwaValid ||
+                      (data.awa_valid && fabsf(data.awa_degrees - _lastAwa) > 0.05f);
+    bool twdChanged = data.twd_valid != _lastTwdValid ||
+                      (data.twd_valid && fabsf(data.twd_degrees - _lastTwd) > 0.05f);
+    float speed = data.show_tws ? data.tws_knots : data.aws_knots;
+    bool speedChanged = data.speed_valid != _lastSpeedValid ||
+                         data.show_tws != _lastShowTws ||
+                         (data.speed_valid && fabsf(speed - _lastSpeed) > 0.01f);
+    bool modeChanged = data.show_tws != _lastShowTws;
+
+    int16_t patchMinX = 0;
+    int16_t patchMinY = 0;
+    int16_t patchMaxX = -1;
+    int16_t patchMaxY = -1;
+
+    if (awaChanged || twdChanged) {
+        int16_t minX = DISPLAY_WIDTH - 1;
+        int16_t minY = DISPLAY_HEIGHT - 1;
+        int16_t maxX = 0;
+        int16_t maxY = 0;
+
+        auto expand = [&](float angle, int16_t width, bool large, bool valid) {
+            if (!valid) return;
+            int16_t bx0, by0, bx1, by1;
+            pointerBounds(angle, width, large, bx0, by0, bx1, by1);
+            if (bx0 < minX) minX = bx0;
+            if (by0 < minY) minY = by0;
+            if (bx1 > maxX) maxX = bx1;
+            if (by1 > maxY) maxY = by1;
+        };
+
+        if (awaChanged) {
+            expand(_lastAwa, 20, true, _lastAwaValid);
+            expand(data.awa_degrees, 20, true, data.awa_valid);
+        }
+        if (twdChanged) {
+            expand(_lastTwd, 14, false, _lastTwdValid);
+            expand(data.twd_degrees, 14, false, data.twd_valid);
+        }
+
+        if (maxX >= minX && maxY >= minY) {
+            patchMinX = minX;
+            patchMinY = minY;
+            patchMaxX = maxX;
+            patchMaxY = maxY;
+            displayStaticLayer().patchRect(display, minX, minY, maxX - minX + 1, maxY - minY + 1);
+        }
+    }
+
+    if (data.awa_valid && (awaChanged || !_cacheValid)) {
+        drawPointer(display, data.awa_degrees, 20, C_WHITE, C_WHITE, false);
+    } else if (_lastAwaValid && !data.awa_valid) {
+        patchPointerRegion(display, _lastAwa, 20, true, true);
+    }
+
+    if (data.twd_valid && (twdChanged || !_cacheValid)) {
+        drawPointer(display, data.twd_degrees, 14, C_CYAN, C_WHITE, false);
+        drawPointer(display, data.twd_degrees, 14, C_CYAN, C_WHITE, true);
+    } else if (_lastTwdValid && !data.twd_valid) {
+        patchPointerRegion(display, _lastTwd, 14, false, true);
+    }
+
+    bool patchHitCenter = patchMaxX >= patchMinX &&
+                          displayRectsOverlap(patchMinX, patchMinY,
+                                              patchMaxX - patchMinX + 1, patchMaxY - patchMinY + 1,
+                                              CX - 58, CY - 18, 116, 48);
+    bool patchHitModeLabel = patchMaxX >= patchMinX &&
+                             displayRectsOverlap(patchMinX, patchMinY,
+                                                 patchMaxX - patchMinX + 1, patchMaxY - patchMinY + 1,
+                                                 MODE_LABEL_PATCH_X, MODE_LABEL_PATCH_Y,
+                                                 MODE_LABEL_PATCH_W, MODE_LABEL_PATCH_H);
+
+    if (speedChanged || patchHitCenter) {
+        drawCenter(display, data, true);
+    }
+
+    if (modeChanged) {
+        displayStaticLayer().patchRect(display, MODE_LABEL_PATCH_X, MODE_LABEL_PATCH_Y,
+                                       MODE_LABEL_PATCH_W, MODE_LABEL_PATCH_H);
+        drawModeIndicator(display, data.show_tws);
+    } else if (patchHitModeLabel) {
+        displayStaticLayer().patchRect(display, MODE_LABEL_PATCH_X, MODE_LABEL_PATCH_Y,
+                                       MODE_LABEL_PATCH_W, MODE_LABEL_PATCH_H);
+        drawModeIndicator(display, data.show_tws);
+    }
+
+    resetCache(data);
+}
+
+void WindWidget::draw(LGFX& display, DisplayUpdateKind kind, const WindWidgetData& data) {
+    DisplayStaticLayer& layer = displayStaticLayer();
+    layer.ensure(display, USER_SCREEN_WIND);
+
+    if (kind == DisplayUpdateKind::Full || !layer.isReadyFor(USER_SCREEN_WIND)) {
+        buildStatic(*layer.sprite());
+        layer.markReady();
+        layer.pushFull(display);
+        drawDynamicFull(display, data);
+        resetCache(data);
+        return;
+    }
+
+    drawDynamicPartial(display, data);
 }
 
 void WindWidget::toggleMode(WindWidgetData& data) {

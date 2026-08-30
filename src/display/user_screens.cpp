@@ -61,17 +61,17 @@ static void drawWindScreen(const UserScreenDrawContext& ctx) {
 
     WindWidgetData next = buildWindWidgetData(*ctx.wind, ctx.wind_stale, ctx.variation);
     s_windDisplay = next;
-    s_windWidget.draw(ctx.display, s_windDisplay);
+    s_windWidget.draw(ctx.display, ctx.update_kind, s_windDisplay);
 }
 
 static void drawSogSpeedometer(const UserScreenDrawContext& ctx) {
     if (!ctx.wind) return;
-    sogSpeedometerScreenDraw(ctx.display, *ctx.wind, ctx.wind_stale, ctx.now_ms);
+    sogSpeedometerScreenDraw(ctx.display, ctx.update_kind, *ctx.wind, ctx.wind_stale, ctx.now_ms);
 }
 
 static void drawEnergyFlow(const UserScreenDrawContext& ctx) {
     if (!ctx.energy) return;
-    energyFlowScreenDraw(ctx.display, *ctx.energy, ctx.energy_stale, ctx.now_ms);
+    energyFlowScreenDraw(ctx.display, ctx.update_kind, *ctx.energy, ctx.energy_stale, ctx.now_ms);
 }
 
 static const UserScreenDescriptor kUserScreens[] = {
