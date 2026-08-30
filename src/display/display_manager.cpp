@@ -1,7 +1,6 @@
 #include "display_manager.h"
 #include "LGFX_config.h"
 #include "config.h"
-#include <math.h>
 
 DisplayManager displayManager;
 
@@ -52,7 +51,7 @@ void DisplayManager::drawConnectionBadge(DisplayConnectionState connState) {
 void DisplayManager::showStatus(DisplayConnectionState state, const char* detail) {
     if (!_ready) return;
 
-    _windScreenActive = false;
+    _userScreenActive = false;
     display.fillScreen(C_BG);
     display.drawCircle(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 112, C_GREY);
 
@@ -101,59 +100,60 @@ void DisplayManager::showStatus(DisplayConnectionState state, const char* detail
     }
 }
 
-bool DisplayManager::windDisplayChanged(const WindWidgetData& prev, const WindWidgetData& next,
-                                        DisplayConnectionState prevConn, DisplayConnectionState nextConn) {
-    if (prevConn != nextConn) return true;
-    if (prev.show_tws != next.show_tws) return true;
-    if (prev.awa_valid != next.awa_valid || prev.twd_valid != next.twd_valid ||
-        prev.speed_valid != next.speed_valid || prev.sog_valid != next.sog_valid) {
-        return true;
+bool DisplayManager::userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool stale,
+                                           DisplayConnectionState connState) {
+    if (_forceRedraw) return true;
+    if (_lastMode != _nav.mode) return true;
+    if (_lastVariation != _nav.variation[_nav.mode]) return true;
+    if (_lastConnState != connState) return true;
+
+    if (desc && desc->needs_wind_data) {
+        return userScreenWindDataChanged(wind, stale, _nav.variation[USER_SCREEN_WIND]);
     }
-    if (prev.awa_valid && fabsf(prev.awa_degrees - next.awa_degrees) > 0.5f) return true;
-    if (prev.twd_valid && fabsf(prev.twd_degrees - next.twd_degrees) > 0.5f) return true;
-    if (prev.speed_valid) {
-        float prevSpeed = prev.show_tws ? prev.tws_knots : prev.aws_knots;
-        float nextSpeed = next.show_tws ? next.tws_knots : next.aws_knots;
-        if (fabsf(prevSpeed - nextSpeed) > 0.05f) return true;
-    }
-    if (next.sog_valid) {
-        if (!prev.sog_valid || fabsf(prev.sog_knots - next.sog_knots) > 0.05f) return true;
-        if (_windWidget.sogBarNeedsRedraw(next.sog_knots, next.sog_valid)) return true;
-    }
+
     return false;
 }
 
-void DisplayManager::showWindInstrument(const WindData& wind, bool stale, DisplayConnectionState connState) {
+void DisplayManager::updateUserScreen(const WindData& wind, bool stale, DisplayConnectionState connState) {
     if (!_ready) return;
 
-    WindWidgetData next = _windDisplay;
-    next.awa_degrees = wind.awa_degrees;
-    next.twd_degrees = wind.twdDialDegrees();
-    next.aws_knots = wind.aws_knots;
-    next.tws_knots = wind.tws_knots;
-    next.sog_knots = wind.sog_knots;
-    next.awa_valid = wind.awa_valid && !stale;
-    next.twd_valid = wind.twd_valid && !stale;
-    next.speed_valid = (next.show_tws ? wind.tws_valid : wind.aws_valid) && !stale;
-    next.sog_valid = wind.sog_valid && !stale;
-    next.now_ms = millis();
+    const UserScreenDescriptor* desc = _nav.currentDescriptor();
+    if (!desc) return;
 
-    if (_windScreenActive && !_forceWindRedraw && !windDisplayChanged(_windDisplay, next, _lastConnState, connState)) {
+    if (_userScreenActive && !userScreenNeedsRedraw(desc, wind, stale, connState)) {
         return;
     }
 
-    _forceWindRedraw = false;
+    _forceRedraw = false;
 
-    _windDisplay = next;
-    _lastConnState = connState;
-    _windScreenActive = true;
+    UserScreenDrawContext ctx = {
+        display,
+        desc->needs_wind_data ? &wind : nullptr,
+        stale,
+        _nav.variation[desc->mode],
+        millis()
+    };
 
-    _windWidget.draw(display, _windDisplay);
+    desc->draw(ctx);
     drawConnectionBadge(connState);
+
+    _userScreenActive = true;
+    _lastMode = _nav.mode;
+    _lastVariation = _nav.variation[_nav.mode];
+    _lastConnState = connState;
 }
 
-void DisplayManager::toggleWindMode() {
-    _windWidget.toggleMode(_windDisplay);
-    _forceWindRedraw = true;
+void DisplayManager::navigateMode(int delta) {
+    _nav.cycleMode(delta);
+    _forceRedraw = true;
 }
 
+void DisplayManager::navigateVariation(int delta) {
+    _nav.cycleVariation(delta);
+    _forceRedraw = true;
+}
+
+const char* DisplayManager::getScreenDebugName() const {
+    const UserScreenDescriptor* desc = _nav.currentDescriptor();
+    return desc ? desc->debug_name : "?";
+}

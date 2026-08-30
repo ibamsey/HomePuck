@@ -68,16 +68,20 @@ When the ESP32 reboots (firmware upload, power cycle), the AP may hold a stale a
 During development on OpenPlotter, clear immediately from the Pi:
 
 ```bash
-ssh pi@openplotter.local "sudo wpa_cli -i wlan1 deauthenticate D8:3B:DA:42:7D:64"
+ssh pi@openplotter.local "sudo wpa_cli -i wlan1 deauthenticate 84:FC:E6:B4:03:D8"
 ```
 
-Replace the MAC with your puck's WiFi MAC if different (serial banner shows `MAC=`).
+Replace the MAC with your puck's WiFi MAC if different (serial banner shows `MAC=`). OpenRemote e-ink unit uses `D8:3B:DA:42:7D:64`.
+
+**Note:** WiFi can remain connected while SignalK fails (heap exhaustion). If wind data stops but `[WiFi] STATUS connected` continues, see [signalk_debug.md](signalk_debug.md).
 
 ## Periodic status (every 10 s when connected)
 
 ```
-[WiFi][00060000] STATUS connected uptime=60s session=58s rssi=-45 ip=10.42.0.123 heap=280000
+[WiFi][00060000] STATUS connected uptime=60s session=58s rssi=-45 ip=10.42.0.123 heap=91200
 ```
+
+Steady-state heap on ESP32-C3 is **~80–95 KB** once the wind sprite is allocated (see [signalk_debug.md](signalk_debug.md)). Higher values appear briefly before the first wind-screen draw.
 
 ## Disabling debug
 
@@ -92,4 +96,6 @@ Rebuild and flash. Connection behaviour is unchanged; only serial output is supp
 ## Related docs
 
 - OpenRemote WiFi guide: `5.79-inch-E-ink-dashboard-with-LVGL-9/docs/wifi_client_guide.md`
+- OpenRemote WiFi ADR: `5.79-inch-E-ink-dashboard-with-LVGL-9/docs/adr/001-wifi-connection-strategy.md`
 - Hardware / network defaults: [hardware.md](hardware.md)
+- SignalK (distinct from WiFi loss): [signalk_debug.md](signalk_debug.md)

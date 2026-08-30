@@ -13,6 +13,10 @@
 #define WIND_WIDGET_SCALE_START 30
 #define WIND_WIDGET_SCALE_END 330
 
+// Wind screen variation indices (UserScreenNav stores opaque uint8_t values)
+#define WIND_VAR_AWS 0
+#define WIND_VAR_TWS 1
+
 struct WindWidgetData {
     float awa_degrees = 0.0f;
     float twd_degrees = 0.0f;

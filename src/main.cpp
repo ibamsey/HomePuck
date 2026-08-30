@@ -29,11 +29,11 @@ static DisplayConnectionState mapConnectionState() {
     return DISPLAY_CONN_SIGNALK_OK;
 }
 
-static void updateWindDisplay() {
+static void updateUserDisplay() {
     WindData wind = signalkClient.getWindData();
     DisplayConnectionState conn = mapConnectionState();
     bool stale = signalkClient.isWindDataStale();
-    displayManager.showWindInstrument(wind, stale, conn);
+    displayManager.updateUserScreen(wind, stale, conn);
 }
 
 static void onWiFiStateChange(WiFiConnectionState state, const char* message) {
@@ -72,20 +72,20 @@ static void onSignalKStateChange(SignalKState state, const String& message) {
     switch (state) {
         case SK_CONNECTING:
         case SK_RECONNECTING:
-            if (!displayManager.isWindScreenActive()) {
+            if (!displayManager.isUserScreenActive()) {
                 displayManager.showStatus(DISPLAY_CONN_SIGNALK_CONNECTING, SIGNALK_HOST);
             }
             break;
 
         case SK_CONNECTED:
-            if (!displayManager.isWindScreenActive()) {
+            if (!displayManager.isUserScreenActive()) {
                 displayManager.showStatus(DISPLAY_CONN_SIGNALK_OK, "Waiting for wind...");
             }
             break;
 
         case SK_DISCONNECTED:
         case SK_ERROR:
-            if (wifiManager.isConnected() && !displayManager.isWindScreenActive()) {
+            if (wifiManager.isConnected() && !displayManager.isUserScreenActive()) {
                 displayManager.showStatus(DISPLAY_CONN_SIGNALK_LOST, "Reconnecting...");
             }
             break;
@@ -122,16 +122,45 @@ static void initTouch() {
 
 static void handleTouch() {
     if (!touch_ready) return;
-    if (!displayManager.isWindScreenActive()) return;
+    if (!displayManager.isUserScreenActive()) return;
     if (!touch.available()) return;
 
     unsigned long now = millis();
-    if (now - last_touch_ms < 300) return;
+    if (now - last_touch_ms < TOUCH_GESTURE_DEBOUNCE_MS) return;
+
+    int delta_mode = 0;
+    int delta_variation = 0;
+
+    switch (touch.data.gestureID) {
+        case SWIPE_LEFT:
+            delta_mode = 1;
+            break;
+        case SWIPE_RIGHT:
+            delta_mode = -1;
+            break;
+        case SWIPE_UP:
+            delta_variation = 1;
+            break;
+        case SWIPE_DOWN:
+            delta_variation = -1;
+            break;
+        default:
+            return;
+    }
+
     last_touch_ms = now;
 
-    displayManager.toggleWindMode();
-    updateWindDisplay();
-    Serial.printf("[APP] Tap -> showing %s\n", displayManager.isShowingTws() ? "TWS" : "AWS");
+    if (delta_mode != 0) {
+        displayManager.navigateMode(delta_mode);
+    } else {
+        displayManager.navigateVariation(delta_variation);
+    }
+
+    updateUserDisplay();
+    Serial.printf("[APP] Gesture %s -> %s var %u\n",
+                  touch.gesture().c_str(),
+                  displayManager.getScreenDebugName(),
+                  displayManager.getVariation());
 }
 
 void setup() {
@@ -171,10 +200,10 @@ void loop() {
     bool wifi_up = wifiManager.isConnected();
     bool signalk_up = signalkClient.isConnected();
 
-    if (wifi_up && (signalk_up || displayManager.isWindScreenActive()) &&
+    if (wifi_up && (signalk_up || displayManager.isUserScreenActive()) &&
         (now - last_display_update_ms >= DISPLAY_UPDATE_INTERVAL_MS)) {
         last_display_update_ms = now;
-        updateWindDisplay();
+        updateUserDisplay();
     }
 
     delay(10);

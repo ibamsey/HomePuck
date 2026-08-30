@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include "signalk_client.h"
-#include "wind_widget.h"
+#include "user_screens.h"
 
 enum DisplayConnectionState {
     DISPLAY_CONN_BOOT,
@@ -19,22 +19,26 @@ class DisplayManager {
 public:
     void begin();
     void showStatus(DisplayConnectionState state, const char* detail = "");
-    void showWindInstrument(const WindData& wind, bool stale, DisplayConnectionState connState);
-    void toggleWindMode();
-    bool isWindScreenActive() const { return _windScreenActive; }
-    bool isShowingTws() const { return _windDisplay.show_tws; }
+    void updateUserScreen(const WindData& wind, bool stale, DisplayConnectionState connState);
+    void navigateMode(int delta);
+    void navigateVariation(int delta);
+    bool isUserScreenActive() const { return _userScreenActive; }
+    UserScreenMode getScreenMode() const { return _nav.mode; }
+    uint8_t getVariation() const { return _nav.variation[_nav.mode]; }
+    const char* getScreenDebugName() const;
 
 private:
     bool _ready = false;
-    bool _windScreenActive = false;
-    bool _forceWindRedraw = false;
+    bool _userScreenActive = false;
+    bool _forceRedraw = false;
+    UserScreenNav _nav;
+    UserScreenMode _lastMode = USER_SCREEN_WIND;
+    uint8_t _lastVariation = 0;
     DisplayConnectionState _lastConnState = DISPLAY_CONN_BOOT;
-    WindWidget _windWidget;
-    WindWidgetData _windDisplay;
     void drawHeader(const char* title, uint16_t color);
     void drawConnectionBadge(DisplayConnectionState connState);
-    bool windDisplayChanged(const WindWidgetData& prev, const WindWidgetData& next,
-                            DisplayConnectionState prevConn, DisplayConnectionState nextConn);
+    bool userScreenNeedsRedraw(const UserScreenDescriptor* desc, const WindData& wind, bool stale,
+                               DisplayConnectionState connState);
 };
 
 extern DisplayManager displayManager;

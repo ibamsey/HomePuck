@@ -32,7 +32,7 @@ Shenzhen Jingcai (JCZN) sells two closely related modules:
 | **2424S012** (or **2424S012C**) | Yes | CST816S/CST816D on I2C — **this project uses this variant** |
 | **2424S012N** | No | Display only; touch code will not apply |
 
-Touch was confirmed working on the development unit (tap toggles AWS/TWS on the wind display).
+Touch was confirmed working on the development unit (swipe navigation on user screens).
 
 ---
 
@@ -98,7 +98,21 @@ Pin assignments match `include/config.h`, `src/LGFX_config.h`, and `platformio.i
 **I2C address:** `0x15`  
 **Library:** [fbiego/CST816S](https://github.com/fbiego/CST816S)
 
-Firmware calls `touch.disable_auto_sleep()` after init so the controller stays responsive between taps.
+Firmware calls `touch.disable_auto_sleep()` after init so the controller stays responsive between gestures.
+
+### Gesture mapping (user screens)
+
+CST816S reports gesture IDs via `touch.data.gestureID` (library: fbiego/CST816S). Gestures apply only after the user screen is active (not during boot status screens).
+
+| Gesture ID | Action |
+|------------|--------|
+| `SWIPE_LEFT` | Next screen mode (cyclical) |
+| `SWIPE_RIGHT` | Previous screen mode |
+| `SWIPE_UP` | Next variation within current screen |
+| `SWIPE_DOWN` | Previous variation within current screen |
+| Tap / click | Ignored (no action) |
+
+Debounce: `TOUCH_GESTURE_DEBOUNCE_MS` (300 ms) in `config.h`.
 
 Serial log on successful touch init:
 
@@ -118,7 +132,9 @@ The round wind dial uses a **bow-up** convention (same as the OpenRemote e-ink d
 - **AWA** pointer: large white triangle (`environment.wind.angleApparent`)
 - **TWD** pointer: smaller cyan triangle with white outline (`environment.wind.directionTrue`, converted relative to heading when available)
 
-**Touch:** tap anywhere on the live wind screen to toggle **AWS** / **TWS** speed readout. Mode pills at the bottom of the dial show the active selection.
+**Touch:** swipe left/right to change screen mode; swipe up/down on the wind screen to switch **AWS** / **TWS** centre readout. Mode pills at the bottom of the dial show the active selection. See [user_screens_architecture.md](user_screens_architecture.md).
+
+**SOG bar:** horizontal bar graph under the "kts" label shows `navigation.speedOverGround`. An amber peak marker tracks the recent max and decays toward current SOG with a **10 s** time constant.
 
 ---
 
@@ -172,8 +188,11 @@ See `include/config.h` for credentials and timeouts. WiFi stack is ported from t
 | `environment.wind.speedTrue` | TWS fallback |
 | `environment.wind.directionTrue` | TWD pointer |
 | `navigation.headingTrue` | Convert TWD to bow-relative dial angle |
+| `navigation.speedOverGround` | SOG bar graph (knots) |
 
 TWD/TWS are produced on the Pi by SignalK **Derived Data** (`groundWind`), not on the ESP32.
+
+SignalK client lifecycle (reconnect memory policy) is documented in [adr/001-signalk-websocket-lifecycle.md](adr/001-signalk-websocket-lifecycle.md).
 
 ---
 
@@ -183,11 +202,16 @@ TWD/TWS are produced on the Pi by SignalK **Derived Data** (`groundWind`), not o
 |------|----------|
 | `include/config.h` | Pin defines, display/touch/WiFi/SignalK constants |
 | `src/LGFX_config.h` | LovyanGFX GC9A01 panel + SPI bus setup |
-| `platformio.ini` | Board env, upload port, pin `build_flags` |
-| `src/main.cpp` | CST816S touch init and tap handler |
+| `platformio.ini` | Board env, upload port, pin `build_flags`; **`src/ui/` excluded** |
+| `src/main.cpp` | CST816S touch init and gesture handler |
 | `src/wifi/wifi_manager.cpp` | WiFi connect/reconnect with serial debug (`DEBUG_WIFI`) |
+| `src/signalk/signalk_client.cpp` | WebSocket client, path list, reconnect lifecycle |
+| `src/display/wind_widget.cpp` | Wind dial, SOG bar, AWS/TWS pills |
+| `src/display/display_manager.cpp` | Status screens, connection badge, dirty-check redraw |
 
-See [wifi_debug.md](wifi_debug.md) for serial monitor patterns and troubleshooting.
+See [wifi_debug.md](wifi_debug.md) and [signalk_debug.md](signalk_debug.md) for serial monitor patterns.
+
+Project overview and agent guidelines: [overview.md](overview.md), [../AGENTS.md](../AGENTS.md).
 
 ---
 
@@ -196,8 +220,10 @@ See [wifi_debug.md](wifi_debug.md) for serial monitor patterns and troubleshooti
 1. Unit arrived with non-working or silent stock firmware over USB.
 2. Identified as ESP32-C3 + GC9A01 on **COM5** via USB native serial.
 3. Minimal LovyanGFX demo confirmed display.
-4. Full HomePuck firmware added: WiFi, SignalK, wind dial, touch AWS/TWS toggle.
-5. Touch confirmed working; CST816S requires `disable_auto_sleep()` for reliable taps.
+4. Full HomePuck firmware added: WiFi, SignalK, wind dial, touch swipe navigation.
+5. Touch confirmed working; CST816S requires `disable_auto_sleep()` for reliable gestures.
+6. SOG bar graph added (`navigation.speedOverGround`).
+7. SignalK WebSocket reconnect memory fix (destroy-only teardown, heap floor) — see ADR-001.
 
 ---
 
