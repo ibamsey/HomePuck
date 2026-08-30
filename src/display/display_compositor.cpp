@@ -83,12 +83,19 @@ void DisplayStaticLayer::patchRect(LGFX& display, int16_t x, int16_t y, int16_t 
     if (y + h > DISPLAY_HEIGHT) h = DISPLAY_HEIGHT - y;
     if (w <= 0 || h <= 0) return;
 
-    // Blit row-by-row with correct sprite stride (single pushImage corrupts multi-row rects).
+    // Strided blit: sprite rows are full panel width. pushImage() resets src_bitwidth
+    // to patch width, so call writeImage directly with pixelcopy_t stride fields.
+    // Note: src_x/src_y and src_x32/src_y32 share a union — set offset via src_x32 only.
     const int32_t sprite_w = _sprite->width();
-    uint16_t* buf = (uint16_t*)_sprite->getBuffer();
-    for (int16_t row = 0; row < h; row++) {
-        display.pushImage(x, y + row, w, 1, buf + (y + row) * sprite_w + x);
-    }
+    const uint32_t fp_one = 1u << lgfx::pixelcopy_t::FP_SCALE;
+    lgfx::pixelcopy_t pc(_sprite->getBuffer(), display.getColorDepth(), _sprite->getColorDepth());
+    pc.src_bitwidth = sprite_w;
+    pc.src_x32 = (uint32_t)x << lgfx::pixelcopy_t::FP_SCALE;
+    pc.src_y32 = (uint32_t)y << lgfx::pixelcopy_t::FP_SCALE;
+    pc.src_x32_add = fp_one;
+    pc.src_y32_add = 0;
+
+    display.getPanel()->writeImage(x, y, w, h, &pc, true);
 }
 
 void DisplayStaticLayer::pushFull(LGFX& display) {
