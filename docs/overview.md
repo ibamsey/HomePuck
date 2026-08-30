@@ -24,7 +24,7 @@ Screen modes (←→) and variations (↑↓)
 
 | Gesture | Action |
 |---------|--------|
-| Swipe left | Next screen: Wind → Screen 2 → Screen 3 → Wind |
+| Swipe left | Next screen: Wind → SOG → Screen 3 → Wind |
 | Swipe right | Previous screen (reverse) |
 | Swipe up | Next variation within current screen |
 | Swipe down | Previous variation within current screen |
@@ -56,7 +56,7 @@ HomePuck/
 | AWS / TWS (centre, large) | Up/down swipe on wind screen; pills at bottom show mode |
 | AWA pointer | White triangle |
 | TWD pointer | Cyan triangle (+ white outline) |
-| SOG bar | Under "kts"; cyan fill, amber peak marker (10 s decay) |
+| SOG speedometer (screen 2) | Colour arc 0–15 kts; white needle; amber VU peak (10 s decay) |
 | Connection badge | Bottom centre: OK / SK... / No SK / WiFi |
 
 Bow-up dial: 0° = top, clockwise positive. Scale arc 30°–330°.

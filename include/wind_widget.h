@@ -22,13 +22,10 @@ struct WindWidgetData {
     float twd_degrees = 0.0f;
     float aws_knots = 0.0f;
     float tws_knots = 0.0f;
-    float sog_knots = 0.0f;
     bool awa_valid = false;
     bool twd_valid = false;
     bool speed_valid = false;
-    bool sog_valid = false;
     bool show_tws = false;
-    unsigned long now_ms = 0;
 };
 
 class WindWidget {
@@ -37,7 +34,6 @@ public:
     ~WindWidget();
     void draw(LGFX& display, const WindWidgetData& data);
     void toggleMode(WindWidgetData& data);
-    bool sogBarNeedsRedraw(float sog_knots, bool valid) const;
 
 private:
     lgfx::LGFX_Sprite* _staticLayer = nullptr;
@@ -50,13 +46,8 @@ private:
     void drawPointer(lgfx::LovyanGFX& gfx, float angle, int16_t width, uint16_t fill, uint16_t outline, bool outlineOnly);
     void drawBoat(lgfx::LovyanGFX& gfx);
     void drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data);
-    void drawSogBar(lgfx::LovyanGFX& gfx, const WindWidgetData& data);
     void drawModeIndicator(lgfx::LovyanGFX& gfx, bool show_tws);
     void drawNoGoLines(lgfx::LovyanGFX& gfx);
-    void updateSogPeak(float sog_knots, bool valid, unsigned long now_ms);
-
-    float _sogPeakKnots = 0.0f;
-    unsigned long _sogPeakLastMs = 0;
 
     static float normalizeAngle(float angle);
     static void ourAngleToPoint(int16_t cx, int16_t cy, int16_t radius, float ourAngle, int16_t& x, int16_t& y);

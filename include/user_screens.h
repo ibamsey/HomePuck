@@ -7,7 +7,7 @@
 
 enum UserScreenMode : uint8_t {
     USER_SCREEN_WIND = 0,
-    USER_SCREEN_PLACEHOLDER_A,
+    USER_SCREEN_SOG,
     USER_SCREEN_PLACEHOLDER_B,
     USER_SCREEN_COUNT
 };
@@ -41,6 +41,6 @@ struct UserScreenNav {
 
 const UserScreenDescriptor* userScreenDescriptor(UserScreenMode mode);
 uint8_t userScreenMaxVariations(UserScreenMode mode);
-bool userScreenWindDataChanged(const WindData& wind, bool stale, uint8_t variation);
+bool userScreenDataChanged(UserScreenMode mode, const WindData& wind, bool stale, uint8_t variation);
 
 #endif // USER_SCREENS_H

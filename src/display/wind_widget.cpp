@@ -10,19 +10,11 @@ static const uint16_t C_WHITE = 0xFFFF;
 static const uint16_t C_GREY = 0x8410;
 static const uint16_t C_CYAN = 0x07FF;
 static const uint16_t C_DIM = 0x4208;
-static const uint16_t C_AMBER = 0xFD20;
 
 static const int16_t CX = WIND_WIDGET_CENTER_X;
 static const int16_t CY = WIND_WIDGET_CENTER_Y;
 static const int16_t OUTER_R = WIND_WIDGET_OUTER_RADIUS;
 static const int16_t INNER_R = WIND_WIDGET_INNER_RADIUS;
-
-static const int16_t SOG_BAR_W = 84;
-static const int16_t SOG_BAR_H = 8;
-static const int16_t SOG_BAR_X = CX - SOG_BAR_W / 2;
-static const int16_t SOG_BAR_Y = CY + 36;
-static const float SOG_BAR_MIN_SCALE_KTS = 6.0f;
-static const float SOG_PEAK_TAU_SEC = 10.0f;
 
 WindWidget::~WindWidget() {
     delete _staticLayer;
@@ -167,64 +159,6 @@ void WindWidget::drawNoGoLines(lgfx::LovyanGFX& gfx) {
     }
 }
 
-void WindWidget::updateSogPeak(float sog_knots, bool valid, unsigned long now_ms) {
-    if (!valid) return;
-
-    if (_sogPeakLastMs == 0) {
-        _sogPeakLastMs = now_ms;
-        _sogPeakKnots = sog_knots;
-        return;
-    }
-
-    float dt_sec = (float)(now_ms - _sogPeakLastMs) / 1000.0f;
-    _sogPeakLastMs = now_ms;
-    if (dt_sec <= 0.0f) return;
-
-    if (sog_knots >= _sogPeakKnots) {
-        _sogPeakKnots = sog_knots;
-    } else {
-        float alpha = 1.0f - expf(-dt_sec / SOG_PEAK_TAU_SEC);
-        _sogPeakKnots += (sog_knots - _sogPeakKnots) * alpha;
-    }
-}
-
-bool WindWidget::sogBarNeedsRedraw(float sog_knots, bool valid) const {
-    if (!valid) return false;
-    return _sogPeakKnots > sog_knots + 0.03f;
-}
-
-void WindWidget::drawSogBar(lgfx::LovyanGFX& gfx, const WindWidgetData& data) {
-    const int16_t x = SOG_BAR_X;
-    const int16_t y = SOG_BAR_Y;
-    const int16_t w = SOG_BAR_W;
-    const int16_t h = SOG_BAR_H;
-
-    gfx.fillRect(x - 2, y - 2, w + 4, h + 4, C_BG);
-
-    float sog = data.sog_valid ? data.sog_knots : 0.0f;
-    float scale = SOG_BAR_MIN_SCALE_KTS;
-    if (data.sog_valid) {
-        scale = fmaxf(SOG_BAR_MIN_SCALE_KTS, fmaxf(_sogPeakKnots, sog) * 1.08f);
-    }
-
-    gfx.drawRoundRect(x, y, w, h, 2, C_GREY);
-
-    if (data.sog_valid && sog > 0.0f) {
-        int16_t fillW = (int16_t)((sog / scale) * (float)(w - 2));
-        if (fillW < 1) fillW = 1;
-        if (fillW > w - 2) fillW = w - 2;
-        gfx.fillRoundRect(x + 1, y + 1, fillW, h - 2, 1, C_CYAN);
-    }
-
-    if (data.sog_valid && _sogPeakKnots > 0.05f) {
-        int16_t peakX = x + 1 + (int16_t)((_sogPeakKnots / scale) * (float)(w - 2));
-        if (peakX < x + 1) peakX = x + 1;
-        if (peakX > x + w - 2) peakX = x + w - 2;
-        gfx.drawFastVLine(peakX, y - 2, h + 4, C_AMBER);
-        gfx.drawFastVLine(peakX + 1, y - 1, h + 2, C_AMBER);
-    }
-}
-
 void WindWidget::drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data) {
     float speed = data.show_tws ? data.tws_knots : data.aws_knots;
 
@@ -235,7 +169,7 @@ void WindWidget::drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data) {
         snprintf(speedBuf, sizeof(speedBuf), "--.-");
     }
 
-    gfx.fillRect(CX - 58, CY - 18, 116, 62, C_BG);
+    gfx.fillRect(CX - 58, CY - 18, 116, 48, C_BG);
 
     gfx.setTextDatum(MC_DATUM);
     gfx.setTextSize(3);
@@ -245,9 +179,6 @@ void WindWidget::drawCenter(lgfx::LovyanGFX& gfx, const WindWidgetData& data) {
     gfx.setTextSize(1);
     gfx.setTextColor(C_GREY, C_BG);
     gfx.drawString("kts", CX, CY + 24);
-
-    updateSogPeak(data.sog_knots, data.sog_valid, data.now_ms);
-    drawSogBar(gfx, data);
 }
 
 void WindWidget::drawModeIndicator(lgfx::LovyanGFX& gfx, bool show_tws) {

@@ -92,9 +92,9 @@ HomePuck-specific serial debug: [docs/wifi_debug.md](docs/wifi_debug.md) (`DEBUG
 
 - **User screens** stay visible during SignalK reconnect; badge shows `SK...` / `No SK` (not full-screen status).
 - **Touch navigation** (CST816S, `touch.disable_auto_sleep()` required):
-  - Swipe **left/right** — cycle screen modes (Wind → Screen 2 → Screen 3 → Wind)
+  - Swipe **left/right** — cycle screen modes (Wind → SOG → Screen 3 → Wind)
   - Swipe **up/down** — cycle variations within current screen (Wind: AWS/TWS)
-- **SOG bar** under kts readout; peak marker decays with 10 s time constant.
+- **SOG speedometer** on screen 2 — 0–15 kts colour dial, amber VU peak marker (10 s decay)
 - **Dirty-check** in `display_manager` skips redraw when values unchanged; SOG peak decay forces periodic updates.
 
 ### Adding screens or variations

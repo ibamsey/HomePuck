@@ -108,7 +108,7 @@ bool DisplayManager::userScreenNeedsRedraw(const UserScreenDescriptor* desc, con
     if (_lastConnState != connState) return true;
 
     if (desc && desc->needs_wind_data) {
-        return userScreenWindDataChanged(wind, stale, _nav.variation[USER_SCREEN_WIND]);
+        return userScreenDataChanged(_nav.mode, wind, stale, _nav.variation[_nav.mode]);
     }
 
     return false;

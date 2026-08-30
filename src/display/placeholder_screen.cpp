@@ -8,14 +8,10 @@ static const uint16_t C_CYAN = 0x07FF;
 static const uint16_t C_DIM = 0x4208;
 
 static const char* screenTitle(UserScreenMode mode) {
-    switch (mode) {
-        case USER_SCREEN_PLACEHOLDER_A:
-            return "Screen 2";
-        case USER_SCREEN_PLACEHOLDER_B:
-            return "Screen 3";
-        default:
-            return "Placeholder";
+    if (mode == USER_SCREEN_PLACEHOLDER_B) {
+        return "Screen 3";
     }
+    return "Placeholder";
 }
 
 void placeholderScreenDraw(LGFX& display, UserScreenMode mode, uint8_t variation) {

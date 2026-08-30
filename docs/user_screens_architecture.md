@@ -145,7 +145,7 @@ Maintain this table when adding or replacing screens:
 | Mode | Debug name | Variations | Needs wind | Render module | Status |
 |------|------------|------------|------------|---------------|--------|
 | `USER_SCREEN_WIND` | Wind | 2 (AWS/TWS) | yes | `wind_widget.cpp` | live |
-| `USER_SCREEN_PLACEHOLDER_A` | Scr2 | 2 | no | `placeholder_screen.cpp` | placeholder |
+| `USER_SCREEN_SOG` | SOG | 1 | yes | `sog_speedometer_screen.cpp` | live |
 | `USER_SCREEN_PLACEHOLDER_B` | Scr3 | 2 | no | `placeholder_screen.cpp` | placeholder |
 
 ---
