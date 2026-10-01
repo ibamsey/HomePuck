@@ -178,6 +178,22 @@ Frame batching: `displayCompositor().beginFrame()` / `endFrame()` wraps every pa
 6. On partial updates, use `displayStaticLayer().patchRect()` before redraw
 7. Test: data updates should not flash the full frame; screen swipe should full-paint once
 
+### Full-viewport screens (Attitude)
+
+When most of the panel changes every tick (artificial horizon, animated diagram), **do not** use `patchRect()` + direct panel draws. That fights the compositor: the static snapshot cannot restore pixels under sky/sea/hull motion.
+
+**Pattern:** render the entire viewport into the shared sprite, then one `pushFull()` per data update.
+
+| Step | Full (screen entry) | Partial (data tick) |
+|------|---------------------|---------------------|
+| Chrome | `buildChrome(sprite)` — title, fixed chrome | skip (sprite retains chrome above viewport) |
+| Viewport | `renderViewport(sprite, data)` | same — clear viewport band in sprite, redraw all dynamic content |
+| Panel | `pushFull(display)` | `pushFull(display)` |
+
+Attitude viewport: `y=22` … `DISPLAY_BADGE_STRIP_Y` (badge strip untouched; compositor overlays badge after push).
+
+Use **patchRect partial refresh** only when dynamic regions are a small fraction of the screen (Wind needle, SOG needle, energy flow dirty rects).
+
 ---
 
 ## RAM constraints
@@ -202,7 +218,8 @@ Maintain this table when adding or replacing screens:
 |------|------------|------------|------------|---------------|--------|
 | `USER_SCREEN_WIND` | Wind | 2 (AWS/TWS) | yes | `wind_widget.cpp` | live |
 | `USER_SCREEN_SOG` | SOG | 1 | yes | `sog_speedometer_screen.cpp` | live |
-| `USER_SCREEN_ENERGY` | Energy | 1 | energy | `energy_flow_screen.cpp` | live |
+| `USER_SCREEN_BME` | BME | 1 | env | `bme_env_screen.cpp` | live |
+| `USER_SCREEN_ATTITUDE` | Attitude | 1 | attitude | `attitude_screen.cpp` | live (full-viewport push) |
 
 ---
 

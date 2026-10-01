@@ -30,19 +30,30 @@ static const int16_t FRIDGE_Y = 182;
 static const int16_t BAT_R = 30;
 static const int16_t NODE_R = 24;
 
+static const int16_t TITLE_Y = 12;
+static const int16_t WATTS_Y = 30;
+static const int16_t SUBTITLE_Y = 44;
+
 static const float GAUGE_ARC_START = 225.0f;
 static const float GAUGE_ARC_SWEEP = 270.0f;
 
 static float s_lastFixed = -999.0f;
 static float s_lastPortable = -999.0f;
-static float s_lastBattery = -999.0f;
 static float s_lastSoc = -999.0f;
 static float s_lastBoat = -999.0f;
 static float s_lastFridge = -999.0f;
+static bool s_lastFixedValid = false;
+static bool s_lastPortableValid = false;
+static bool s_lastSocValid = false;
+static bool s_lastBoatValid = false;
+static bool s_lastFridgeValid = false;
 static bool s_lastDemo = false;
 static bool s_cacheValid = false;
+static unsigned long s_lastFlowAnimMs = 0;
 
 static const int FLOW_LINE_COUNT = 4;
+static const unsigned long FLOW_ANIM_INTERVAL_MS = 80;
+static bool s_lastFlowActive[FLOW_LINE_COUNT] = {false};
 static int16_t s_lastDotX[FLOW_LINE_COUNT] = {0};
 static int16_t s_lastDotY[FLOW_LINE_COUNT] = {0};
 static bool s_lastDotValid[FLOW_LINE_COUNT] = {false};
@@ -161,6 +172,64 @@ static void drawGaugeArc(lgfx::LovyanGFX& gfx, int16_t cx, int16_t cy, int16_t o
     }
 }
 
+static void drawArrowHead(lgfx::LovyanGFX& gfx, int16_t px, int16_t py, int16_t tx, int16_t ty,
+                          uint16_t color) {
+    float dx = (float)(tx - px);
+    float dy = (float)(ty - py);
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 1.0f) return;
+
+    dx /= len;
+    dy /= len;
+    int16_t tipX = px + (int16_t)(dx * 5.0f);
+    int16_t tipY = py + (int16_t)(dy * 5.0f);
+    int16_t backX = px - (int16_t)(dx * 3.0f);
+    int16_t backY = py - (int16_t)(dy * 3.0f);
+    int16_t lx = backX + (int16_t)(-dy * 3.0f);
+    int16_t ly = backY + (int16_t)(dx * 3.0f);
+    int16_t rx = backX - (int16_t)(-dy * 3.0f);
+    int16_t ry = backY - (int16_t)(dx * 3.0f);
+    gfx.fillTriangle(tipX, tipY, lx, ly, rx, ry, color);
+}
+
+static void flowSpokeGeometry(FlowLineId id, int16_t& x0, int16_t& y0, int16_t& r0,
+                              int16_t& x1, int16_t& y1, int16_t& r1) {
+    switch (id) {
+        case FLOW_FIXED:
+            x0 = FIX_X; y0 = FIX_Y; r0 = NODE_R; x1 = BAT_X; y1 = BAT_Y; r1 = BAT_R;
+            break;
+        case FLOW_PORTABLE:
+            x0 = PORT_X; y0 = PORT_Y; r0 = NODE_R; x1 = BAT_X; y1 = BAT_Y; r1 = BAT_R;
+            break;
+        case FLOW_BOAT:
+            x0 = BAT_X; y0 = BAT_Y; r0 = BAT_R; x1 = BOAT_X; y1 = BOAT_Y; r1 = NODE_R;
+            break;
+        case FLOW_FRIDGE:
+            x0 = BAT_X; y0 = BAT_Y; r0 = BAT_R; x1 = FRIDGE_X; y1 = FRIDGE_Y; r1 = NODE_R;
+            break;
+    }
+}
+
+static void patchFlowSpoke(LGFX& display, FlowLineId id) {
+    int16_t x0, y0, r0, x1, y1, r1;
+    flowSpokeGeometry(id, x0, y0, r0, x1, y1, r1);
+
+    int16_t sx, sy, ex, ey;
+    edgePoint(x0, y0, r0, x1, y1, sx, sy);
+    edgePoint(x1, y1, r1, x0, y0, ex, ey);
+
+    int16_t minX = sx < ex ? sx : ex;
+    int16_t maxX = sx > ex ? sx : ex;
+    int16_t minY = sy < ey ? sy : ey;
+    int16_t maxY = sy > ey ? sy : ey;
+    minX -= 6;
+    minY -= 6;
+    maxX += 6;
+    maxY += 6;
+
+    displayStaticLayer().patchRect(display, minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
 static void drawFlowLine(lgfx::LovyanGFX& gfx, int16_t x0, int16_t y0, int16_t r0,
                          int16_t x1, int16_t y1, int16_t r1,
                          float watts, float max_watts, unsigned long now_ms,
@@ -186,7 +255,7 @@ static void drawFlowLine(lgfx::LovyanGFX& gfx, int16_t x0, int16_t y0, int16_t r
     float t = fmodf((float)now_ms / 1200.0f, 1.0f);
     int16_t px = sx + (int16_t)((float)(ex - sx) * t);
     int16_t py = sy + (int16_t)((float)(ey - sy) * t);
-    gfx.fillCircle(px, py, 2, color);
+    drawArrowHead(gfx, px, py, ex, ey, color);
 
     if (outDotX) *outDotX = px;
     if (outDotY) *outDotY = py;
@@ -206,7 +275,7 @@ static void drawLabelOutside(lgfx::LovyanGFX& gfx, int16_t x, int16_t y, int16_t
 }
 
 static void drawCenterReading(lgfx::LovyanGFX& gfx, int16_t x, int16_t y,
-                              const char* main_text, bool valid) {
+                              const char* main_text, bool valid, uint16_t bg) {
     size_t len = strlen(main_text);
     uint8_t text_size = 2;
     if (len <= 2) {
@@ -217,8 +286,20 @@ static void drawCenterReading(lgfx::LovyanGFX& gfx, int16_t x, int16_t y,
 
     gfx.setTextDatum(MC_DATUM);
     gfx.setTextSize(text_size);
-    gfx.setTextColor(valid ? C_WHITE : C_GREY, C_BG);
+    gfx.setTextColor(valid ? C_WHITE : C_GREY, bg);
     gfx.drawString(main_text, x, y);
+}
+
+static void drawScreenHeader(lgfx::LovyanGFX& gfx) {
+    gfx.setTextDatum(TC_DATUM);
+    gfx.setTextSize(2);
+    gfx.setTextColor(C_WHITE, C_BG);
+    gfx.drawString("Energy", CX, TITLE_Y);
+    gfx.setTextSize(1);
+    gfx.setTextColor(C_GREY, C_BG);
+    gfx.drawString("Watts", CX, WATTS_Y);
+    gfx.setTextColor(C_DIM, C_BG);
+    gfx.drawString("Power flow", CX, SUBTITLE_Y);
 }
 
 static void drawGaugeShell(lgfx::LovyanGFX& gfx, int16_t x, int16_t y, int16_t radius,
@@ -229,13 +310,11 @@ static void drawGaugeShell(lgfx::LovyanGFX& gfx, int16_t x, int16_t y, int16_t r
     drawLabelOutside(gfx, x, y, radius, label, label_pos);
 }
 
-static void drawGaugeDynamic(lgfx::LovyanGFX& gfx, int16_t x, int16_t y, int16_t radius,
-                             float watts, float max_watts, bool valid) {
+static void drawGaugeValueOverlay(lgfx::LovyanGFX& gfx, int16_t x, int16_t y, int16_t radius,
+                                  float watts, float max_watts, bool valid) {
     float pct = gaugePct(watts, max_watts, valid);
     uint16_t fill = heatColor(pct);
 
-    gfx.fillCircle(x, y, radius - 4, C_DIM);
-    drawGaugeArc(gfx, x, y, radius, radius - 5, 0.0f, 1.0f, C_TRACK);
     if (valid && pct > 0.01f) {
         drawGaugeArc(gfx, x, y, radius, radius - 5, 0.0f, pct, fill);
     }
@@ -247,17 +326,15 @@ static void drawGaugeDynamic(lgfx::LovyanGFX& gfx, int16_t x, int16_t y, int16_t
     } else {
         snprintf(value_buf, sizeof(value_buf), "--");
     }
-    drawCenterReading(gfx, x, y, value_buf, valid);
+    drawCenterReading(gfx, x, y, value_buf, valid, C_DIM);
 }
 
-static void drawBatteryDynamic(lgfx::LovyanGFX& gfx, const EnergyData& data) {
+static void drawBatteryValueOverlay(lgfx::LovyanGFX& gfx, const EnergyData& data) {
     bool valid = data.battery_soc_valid;
     float soc = valid ? data.battery_soc_pct : 0.0f;
     float pct = gaugePct(soc, ENERGY_GAUGE_BATTERY_MAX_PCT, valid);
     uint16_t fill = heatColor(pct);
 
-    gfx.fillCircle(BAT_X, BAT_Y, BAT_R - 4, C_DIM);
-    drawGaugeArc(gfx, BAT_X, BAT_Y, BAT_R, BAT_R - 6, 0.0f, 1.0f, C_TRACK);
     if (valid && pct > 0.01f) {
         drawGaugeArc(gfx, BAT_X, BAT_Y, BAT_R, BAT_R - 6, 0.0f, pct, fill);
     }
@@ -269,7 +346,7 @@ static void drawBatteryDynamic(lgfx::LovyanGFX& gfx, const EnergyData& data) {
     } else {
         snprintf(value_buf, sizeof(value_buf), "--%");
     }
-    drawCenterReading(gfx, BAT_X, BAT_Y, value_buf, valid);
+    drawCenterReading(gfx, BAT_X, BAT_Y, value_buf, valid, C_DIM);
 }
 
 static void patchNodeRegion(LGFX& display, int16_t x, int16_t y, int16_t radius) {
@@ -277,18 +354,9 @@ static void patchNodeRegion(LGFX& display, int16_t x, int16_t y, int16_t radius)
     displayStaticLayer().patchRect(display, x - patchR, y - patchR, patchR * 2 + 1, patchR * 2 + 1);
 }
 
-static void patchDotRegion(LGFX& display, int16_t px, int16_t py) {
-    displayStaticLayer().patchRect(display, px - 6, py - 6, 13, 13);
-}
-
 static void buildStaticLayer(lgfx::LGFX_Sprite& sprite) {
     sprite.fillScreen(C_BG);
-    sprite.drawCircle(CX, DISPLAY_HEIGHT / 2, 112, C_GREY);
-
-    sprite.setTextSize(1);
-    sprite.setTextDatum(TC_DATUM);
-    sprite.setTextColor(C_WHITE, C_BG);
-    sprite.drawString("Energy Flow", CX, 8);
+    drawScreenHeader(sprite);
 
     drawGaugeShell(sprite, FIX_X, FIX_Y, NODE_R, "Fixed", LABEL_BELOW);
     drawGaugeShell(sprite, PORT_X, PORT_Y, NODE_R, "Portable", LABEL_BELOW);
@@ -298,103 +366,201 @@ static void buildStaticLayer(lgfx::LGFX_Sprite& sprite) {
 }
 
 static void drawDemoLabel(lgfx::LovyanGFX& gfx, bool use_demo) {
-    gfx.fillRect(CX - 24, 16, 48, 10, C_BG);
+    gfx.fillRect(CX + 48, 6, 44, 12, C_BG);
     if (use_demo) {
         gfx.setTextSize(1);
-        gfx.setTextDatum(TC_DATUM);
+        gfx.setTextDatum(MC_DATUM);
         gfx.setTextColor(C_DEMO, C_BG);
-        gfx.drawString("DEMO", CX, 18);
+        gfx.drawString("DEMO", CX + 70, 12);
+    }
+}
+
+static void drawFlowLineById(lgfx::LovyanGFX& gfx, FlowLineId id, const EnergyData& view, unsigned long now_ms) {
+    switch (id) {
+        case FLOW_FIXED:
+            if (view.fixed_solar_valid && view.fixed_solar_w > ENERGY_FLOW_MIN_WATTS) {
+                drawFlowLine(gfx, FIX_X, FIX_Y, NODE_R, BAT_X, BAT_Y, BAT_R,
+                             view.fixed_solar_w, ENERGY_GAUGE_FIXED_MAX_W, now_ms,
+                             &s_lastDotX[FLOW_FIXED], &s_lastDotY[FLOW_FIXED]);
+                s_lastDotValid[FLOW_FIXED] = true;
+            } else {
+                s_lastDotValid[FLOW_FIXED] = false;
+            }
+            break;
+        case FLOW_PORTABLE:
+            if (view.portable_solar_valid && view.portable_solar_w > ENERGY_FLOW_MIN_WATTS) {
+                drawFlowLine(gfx, PORT_X, PORT_Y, NODE_R, BAT_X, BAT_Y, BAT_R,
+                             view.portable_solar_w, ENERGY_GAUGE_PORTABLE_MAX_W, now_ms + 200,
+                             &s_lastDotX[FLOW_PORTABLE], &s_lastDotY[FLOW_PORTABLE]);
+                s_lastDotValid[FLOW_PORTABLE] = true;
+            } else {
+                s_lastDotValid[FLOW_PORTABLE] = false;
+            }
+            break;
+        case FLOW_BOAT:
+            if (view.boat_load_valid && view.boat_load_w > ENERGY_FLOW_MIN_WATTS) {
+                drawFlowLine(gfx, BAT_X, BAT_Y, BAT_R, BOAT_X, BOAT_Y, NODE_R,
+                             view.boat_load_w, ENERGY_GAUGE_BOAT_MAX_W, now_ms + 300,
+                             &s_lastDotX[FLOW_BOAT], &s_lastDotY[FLOW_BOAT]);
+                s_lastDotValid[FLOW_BOAT] = true;
+            } else {
+                s_lastDotValid[FLOW_BOAT] = false;
+            }
+            break;
+        case FLOW_FRIDGE:
+            if (view.fridge_load_valid && view.fridge_load_w > ENERGY_FLOW_MIN_WATTS) {
+                drawFlowLine(gfx, BAT_X, BAT_Y, BAT_R, FRIDGE_X, FRIDGE_Y, NODE_R,
+                             view.fridge_load_w, ENERGY_GAUGE_FRIDGE_MAX_W, now_ms + 500,
+                             &s_lastDotX[FLOW_FRIDGE], &s_lastDotY[FLOW_FRIDGE]);
+                s_lastDotValid[FLOW_FRIDGE] = true;
+            } else {
+                s_lastDotValid[FLOW_FRIDGE] = false;
+            }
+            break;
     }
 }
 
 static void drawAllFlowLines(lgfx::LovyanGFX& gfx, const EnergyData& view, unsigned long now_ms) {
-    if (view.fixed_solar_valid && view.fixed_solar_w > ENERGY_FLOW_MIN_WATTS) {
-        drawFlowLine(gfx, FIX_X, FIX_Y, NODE_R, BAT_X, BAT_Y, BAT_R,
-                     view.fixed_solar_w, ENERGY_GAUGE_FIXED_MAX_W, now_ms,
-                     &s_lastDotX[FLOW_FIXED], &s_lastDotY[FLOW_FIXED]);
-        s_lastDotValid[FLOW_FIXED] = true;
-    } else {
-        s_lastDotValid[FLOW_FIXED] = false;
-    }
-
-    if (view.portable_solar_valid && view.portable_solar_w > ENERGY_FLOW_MIN_WATTS) {
-        drawFlowLine(gfx, PORT_X, PORT_Y, NODE_R, BAT_X, BAT_Y, BAT_R,
-                     view.portable_solar_w, ENERGY_GAUGE_PORTABLE_MAX_W, now_ms + 200,
-                     &s_lastDotX[FLOW_PORTABLE], &s_lastDotY[FLOW_PORTABLE]);
-        s_lastDotValid[FLOW_PORTABLE] = true;
-    } else {
-        s_lastDotValid[FLOW_PORTABLE] = false;
-    }
-
-    if (view.boat_load_valid && view.boat_load_w > ENERGY_FLOW_MIN_WATTS) {
-        drawFlowLine(gfx, BAT_X, BAT_Y, BAT_R, BOAT_X, BOAT_Y, NODE_R,
-                     view.boat_load_w, ENERGY_GAUGE_BOAT_MAX_W, now_ms + 300,
-                     &s_lastDotX[FLOW_BOAT], &s_lastDotY[FLOW_BOAT]);
-        s_lastDotValid[FLOW_BOAT] = true;
-    } else {
-        s_lastDotValid[FLOW_BOAT] = false;
-    }
-
-    if (view.fridge_load_valid && view.fridge_load_w > ENERGY_FLOW_MIN_WATTS) {
-        drawFlowLine(gfx, BAT_X, BAT_Y, BAT_R, FRIDGE_X, FRIDGE_Y, NODE_R,
-                     view.fridge_load_w, ENERGY_GAUGE_FRIDGE_MAX_W, now_ms + 500,
-                     &s_lastDotX[FLOW_FRIDGE], &s_lastDotY[FLOW_FRIDGE]);
-        s_lastDotValid[FLOW_FRIDGE] = true;
-    } else {
-        s_lastDotValid[FLOW_FRIDGE] = false;
+    for (int i = 0; i < FLOW_LINE_COUNT; i++) {
+        drawFlowLineById(gfx, static_cast<FlowLineId>(i), view, now_ms);
     }
 }
 
-static void drawAllGaugesDynamic(lgfx::LovyanGFX& gfx, const EnergyData& view) {
-    drawGaugeDynamic(gfx, FIX_X, FIX_Y, NODE_R,
-                     view.fixed_solar_w, ENERGY_GAUGE_FIXED_MAX_W, view.fixed_solar_valid);
-    drawGaugeDynamic(gfx, PORT_X, PORT_Y, NODE_R,
-                     view.portable_solar_w, ENERGY_GAUGE_PORTABLE_MAX_W, view.portable_solar_valid);
-    drawBatteryDynamic(gfx, view);
-    drawGaugeDynamic(gfx, BOAT_X, BOAT_Y, NODE_R,
-                     view.boat_load_w, ENERGY_GAUGE_BOAT_MAX_W, view.boat_load_valid);
-    drawGaugeDynamic(gfx, FRIDGE_X, FRIDGE_Y, NODE_R,
-                     view.fridge_load_w, ENERGY_GAUGE_FRIDGE_MAX_W, view.fridge_load_valid);
+static void drawAllGaugesOverlay(lgfx::LovyanGFX& gfx, const EnergyData& view) {
+    drawGaugeValueOverlay(gfx, FIX_X, FIX_Y, NODE_R,
+                          view.fixed_solar_w, ENERGY_GAUGE_FIXED_MAX_W, view.fixed_solar_valid);
+    drawGaugeValueOverlay(gfx, PORT_X, PORT_Y, NODE_R,
+                          view.portable_solar_w, ENERGY_GAUGE_PORTABLE_MAX_W, view.portable_solar_valid);
+    drawBatteryValueOverlay(gfx, view);
+    drawGaugeValueOverlay(gfx, BOAT_X, BOAT_Y, NODE_R,
+                          view.boat_load_w, ENERGY_GAUGE_BOAT_MAX_W, view.boat_load_valid);
+    drawGaugeValueOverlay(gfx, FRIDGE_X, FRIDGE_Y, NODE_R,
+                          view.fridge_load_w, ENERGY_GAUGE_FRIDGE_MAX_W, view.fridge_load_valid);
+}
+
+static bool flowLineActive(const EnergyData& view, FlowLineId id) {
+    switch (id) {
+        case FLOW_FIXED:
+            return view.fixed_solar_valid && view.fixed_solar_w > ENERGY_FLOW_MIN_WATTS;
+        case FLOW_PORTABLE:
+            return view.portable_solar_valid && view.portable_solar_w > ENERGY_FLOW_MIN_WATTS;
+        case FLOW_BOAT:
+            return view.boat_load_valid && view.boat_load_w > ENERGY_FLOW_MIN_WATTS;
+        case FLOW_FRIDGE:
+            return view.fridge_load_valid && view.fridge_load_w > ENERGY_FLOW_MIN_WATTS;
+    }
+    return false;
+}
+
+static bool flowAnimationDue(unsigned long now_ms, const EnergyData& view) {
+    if (now_ms - s_lastFlowAnimMs < FLOW_ANIM_INTERVAL_MS) {
+        return false;
+    }
+    for (int i = 0; i < FLOW_LINE_COUNT; i++) {
+        if (flowLineActive(view, static_cast<FlowLineId>(i))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void updateFieldCache(const EnergyData& view, bool use_demo) {
     s_lastFixed = view.fixed_solar_w;
     s_lastPortable = view.portable_solar_w;
-    s_lastBattery = view.battery_power_w;
     s_lastSoc = view.battery_soc_pct;
     s_lastBoat = view.boat_load_w;
     s_lastFridge = view.fridge_load_w;
+    s_lastFixedValid = view.fixed_solar_valid;
+    s_lastPortableValid = view.portable_solar_valid;
+    s_lastSocValid = view.battery_soc_valid;
+    s_lastBoatValid = view.boat_load_valid;
+    s_lastFridgeValid = view.fridge_load_valid;
     s_lastDemo = use_demo;
     s_cacheValid = true;
 }
 
-static bool energyFieldChanged(float prev, float next, bool valid) {
-    if (!valid) return false;
-    return prev < -900.0f || fabsf(prev - next) > 1.0f;
+static bool gaugeValueChanged(float prev, float next, bool prev_valid, bool next_valid) {
+    if (prev_valid != next_valid) return true;
+    if (!next_valid) return false;
+    if (!s_cacheValid || prev < -900.0f) return true;
+    return lroundf(prev) != lroundf(next);
 }
 
-bool energyFlowDataChanged(const EnergyData& energy, bool stale) {
+static bool fixedGaugeChanged(const EnergyData& view) {
+    return gaugeValueChanged(s_lastFixed, view.fixed_solar_w, s_lastFixedValid, view.fixed_solar_valid);
+}
+
+static bool portableGaugeChanged(const EnergyData& view) {
+    return gaugeValueChanged(s_lastPortable, view.portable_solar_w, s_lastPortableValid, view.portable_solar_valid);
+}
+
+static bool batteryGaugeChanged(const EnergyData& view) {
+    return gaugeValueChanged(s_lastSoc, view.battery_soc_pct, s_lastSocValid, view.battery_soc_valid);
+}
+
+static bool boatGaugeChanged(const EnergyData& view) {
+    return gaugeValueChanged(s_lastBoat, view.boat_load_w, s_lastBoatValid, view.boat_load_valid);
+}
+
+static bool fridgeGaugeChanged(const EnergyData& view) {
+    return gaugeValueChanged(s_lastFridge, view.fridge_load_w, s_lastFridgeValid, view.fridge_load_valid);
+}
+
+static bool flowLineChanged(FlowLineId id, const EnergyData& view) {
+    switch (id) {
+        case FLOW_FIXED: return fixedGaugeChanged(view);
+        case FLOW_PORTABLE: return portableGaugeChanged(view);
+        case FLOW_BOAT: return boatGaugeChanged(view);
+        case FLOW_FRIDGE: return fridgeGaugeChanged(view);
+    }
+    return false;
+}
+
+static void updateFlowActiveCache(const EnergyData& view) {
+    for (int i = 0; i < FLOW_LINE_COUNT; i++) {
+        s_lastFlowActive[i] = flowLineActive(view, static_cast<FlowLineId>(i));
+    }
+}
+
+static void redrawActiveFlowSpokes(LGFX& display, const EnergyData& view, unsigned long now_ms) {
+    for (int i = 0; i < FLOW_LINE_COUNT; i++) {
+        FlowLineId id = static_cast<FlowLineId>(i);
+        if (flowLineActive(view, id)) {
+            patchFlowSpoke(display, id);
+            drawFlowLineById(display, id, view, now_ms);
+        }
+    }
+}
+
+static bool energyViewChanged(const EnergyData& view) {
+    return fixedGaugeChanged(view) ||
+           portableGaugeChanged(view) ||
+           batteryGaugeChanged(view) ||
+           boatGaugeChanged(view) ||
+           fridgeGaugeChanged(view);
+}
+
+bool energyFlowDataChanged(const EnergyData& energy, bool stale, unsigned long now_ms) {
+    bool use_demo = false;
 #if ENERGY_FLOW_DEMO_WHEN_STALE
-    if (stale || !energy.hasAny()) {
+    use_demo = stale || !energy.hasAny();
+#endif
+
+    if (use_demo != s_lastDemo) {
         return true;
     }
-#else
-    (void)stale;
-    if (!energy.hasAny()) return false;
-#endif
 
-    bool changed = energyFieldChanged(s_lastFixed, energy.fixed_solar_w, energy.fixed_solar_valid) ||
-                   energyFieldChanged(s_lastPortable, energy.portable_solar_w, energy.portable_solar_valid) ||
-                   energyFieldChanged(s_lastBattery, energy.battery_power_w, energy.battery_power_valid) ||
-                   energyFieldChanged(s_lastSoc, energy.battery_soc_pct, energy.battery_soc_valid) ||
-                   energyFieldChanged(s_lastBoat, energy.boat_load_w, energy.boat_load_valid) ||
-                   energyFieldChanged(s_lastFridge, energy.fridge_load_w, energy.fridge_load_valid);
+    EnergyData view = use_demo ? demoEnergy(now_ms) : energy;
 
-#if ENERGY_FLOW_DEMO_WHEN_STALE
-    if (s_lastDemo != (stale || !energy.hasAny())) changed = true;
-#endif
+    if (!s_cacheValid) {
+        return true;
+    }
 
-    return changed;
+    if (energyViewChanged(view)) {
+        return true;
+    }
+
+    return flowAnimationDue(now_ms, view);
 }
 
 void energyFlowScreenDraw(LGFX& display, DisplayUpdateKind kind, const EnergyData& energy, bool stale,
@@ -416,7 +582,9 @@ void energyFlowScreenDraw(LGFX& display, DisplayUpdateKind kind, const EnergyDat
         layer.pushFull(display);
         drawDemoLabel(display, use_demo);
         drawAllFlowLines(display, view, now_ms);
-        drawAllGaugesDynamic(display, view);
+        drawAllGaugesOverlay(display, view);
+        updateFlowActiveCache(view);
+        s_lastFlowAnimMs = now_ms;
         updateFieldCache(view, use_demo);
         return;
     }
@@ -426,26 +594,66 @@ void energyFlowScreenDraw(LGFX& display, DisplayUpdateKind kind, const EnergyDat
         drawDemoLabel(display, use_demo);
     }
 
-    bool fixedChanged = energyFieldChanged(s_lastFixed, view.fixed_solar_w, view.fixed_solar_valid);
-    bool portableChanged = energyFieldChanged(s_lastPortable, view.portable_solar_w, view.portable_solar_valid);
-    bool batteryChanged = energyFieldChanged(s_lastBattery, view.battery_power_w, view.battery_power_valid) ||
-                          energyFieldChanged(s_lastSoc, view.battery_soc_pct, view.battery_soc_valid);
-    bool boatChanged = energyFieldChanged(s_lastBoat, view.boat_load_w, view.boat_load_valid);
-    bool fridgeChanged = energyFieldChanged(s_lastFridge, view.fridge_load_w, view.fridge_load_valid);
+    bool fixedChanged = fixedGaugeChanged(view);
+    bool portableChanged = portableGaugeChanged(view);
+    bool batteryChanged = batteryGaugeChanged(view);
+    bool boatChanged = boatGaugeChanged(view);
+    bool fridgeChanged = fridgeGaugeChanged(view);
+    bool animDue = flowAnimationDue(now_ms, view);
+    bool flowNeedsUpdate = animDue || fixedChanged || portableChanged || boatChanged || fridgeChanged;
 
-    for (int i = 0; i < FLOW_LINE_COUNT; i++) {
-        if (s_lastDotValid[i]) {
-            patchDotRegion(display, s_lastDotX[i], s_lastDotY[i]);
+    if (flowNeedsUpdate) {
+        for (int i = 0; i < FLOW_LINE_COUNT; i++) {
+            FlowLineId id = static_cast<FlowLineId>(i);
+            bool active = flowLineActive(view, id);
+            bool wasActive = s_lastFlowActive[i];
+            if (animDue || flowLineChanged(id, view) || active != wasActive) {
+                if (active || wasActive) {
+                    patchFlowSpoke(display, id);
+                }
+            }
+        }
+
+        for (int i = 0; i < FLOW_LINE_COUNT; i++) {
+            FlowLineId id = static_cast<FlowLineId>(i);
+            if (flowLineActive(view, id)) {
+                drawFlowLineById(display, id, view, now_ms);
+            }
+        }
+        updateFlowActiveCache(view);
+        if (animDue) {
+            s_lastFlowAnimMs = now_ms;
         }
     }
 
-    if (fixedChanged) patchNodeRegion(display, FIX_X, FIX_Y, NODE_R);
-    if (portableChanged) patchNodeRegion(display, PORT_X, PORT_Y, NODE_R);
-    if (batteryChanged) patchNodeRegion(display, BAT_X, BAT_Y, BAT_R);
-    if (boatChanged) patchNodeRegion(display, BOAT_X, BOAT_Y, NODE_R);
-    if (fridgeChanged) patchNodeRegion(display, FRIDGE_X, FRIDGE_Y, NODE_R);
+    if (fixedChanged) {
+        patchNodeRegion(display, FIX_X, FIX_Y, NODE_R);
+        drawGaugeValueOverlay(display, FIX_X, FIX_Y, NODE_R,
+                              view.fixed_solar_w, ENERGY_GAUGE_FIXED_MAX_W, view.fixed_solar_valid);
+    }
+    if (portableChanged) {
+        patchNodeRegion(display, PORT_X, PORT_Y, NODE_R);
+        drawGaugeValueOverlay(display, PORT_X, PORT_Y, NODE_R,
+                              view.portable_solar_w, ENERGY_GAUGE_PORTABLE_MAX_W, view.portable_solar_valid);
+    }
+    if (batteryChanged) {
+        patchNodeRegion(display, BAT_X, BAT_Y, BAT_R);
+        drawBatteryValueOverlay(display, view);
+    }
+    if (boatChanged) {
+        patchNodeRegion(display, BOAT_X, BOAT_Y, NODE_R);
+        drawGaugeValueOverlay(display, BOAT_X, BOAT_Y, NODE_R,
+                              view.boat_load_w, ENERGY_GAUGE_BOAT_MAX_W, view.boat_load_valid);
+    }
+    if (fridgeChanged) {
+        patchNodeRegion(display, FRIDGE_X, FRIDGE_Y, NODE_R);
+        drawGaugeValueOverlay(display, FRIDGE_X, FRIDGE_Y, NODE_R,
+                              view.fridge_load_w, ENERGY_GAUGE_FRIDGE_MAX_W, view.fridge_load_valid);
+    }
 
-    drawAllFlowLines(display, view, now_ms);
-    drawAllGaugesDynamic(display, view);
+    if (fixedChanged || portableChanged || batteryChanged || boatChanged || fridgeChanged) {
+        redrawActiveFlowSpokes(display, view, now_ms);
+    }
+
     updateFieldCache(view, use_demo);
 }

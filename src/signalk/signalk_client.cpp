@@ -64,6 +64,10 @@ bool SignalKClient::begin() {
     _subscribed_paths.push_back(SK_PATH_VICTRON_B_LOAD);
     _subscribed_paths.push_back(SK_PATH_BATTERY_POWER);
     _subscribed_paths.push_back(SK_PATH_BATTERY_SOC);
+    _subscribed_paths.push_back(SK_PATH_OUTSIDE_PRESSURE);
+    _subscribed_paths.push_back(SK_PATH_CABIN_TEMPERATURE);
+    _subscribed_paths.push_back(SK_PATH_ATTITUDE);
+    _subscribed_paths.push_back(SK_PATH_NAVIGATION_POSITION);
 
     Serial.printf("[SIGNALK] %d paths subscribed\n", (int)_subscribed_paths.size());
     return true;
@@ -210,6 +214,48 @@ bool SignalKClient::isEnergyDataStale() const {
     return (millis() - _energy.last_update) > SIGNALK_DATA_STALE_THRESHOLD_MS;
 }
 
+EnvironmentData SignalKClient::getEnvironmentData() {
+    EnvironmentData copy;
+    if (xSemaphoreTake(_data_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        copy = _environment;
+        xSemaphoreGive(_data_mutex);
+    }
+    return copy;
+}
+
+bool SignalKClient::isEnvironmentDataStale() const {
+    if (_environment.last_update == 0) return true;
+    return (millis() - _environment.last_update) > SIGNALK_DATA_STALE_THRESHOLD_MS;
+}
+
+AttitudeData SignalKClient::getAttitudeData() {
+    AttitudeData copy;
+    if (xSemaphoreTake(_data_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        copy = _attitude;
+        xSemaphoreGive(_data_mutex);
+    }
+    return copy;
+}
+
+bool SignalKClient::isAttitudeDataStale() const {
+    if (_attitude.last_update == 0) return true;
+    return (millis() - _attitude.last_update) > SIGNALK_DATA_STALE_THRESHOLD_MS;
+}
+
+PositionData SignalKClient::getPositionData() {
+    PositionData copy;
+    if (xSemaphoreTake(_data_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        copy = _position;
+        xSemaphoreGive(_data_mutex);
+    }
+    return copy;
+}
+
+bool SignalKClient::isPositionDataStale() const {
+    if (_position.last_update == 0) return true;
+    return (millis() - _position.last_update) > SIGNALK_DATA_STALE_THRESHOLD_MS;
+}
+
 void SignalKClient::_staticEventHandler(void* handler_args, esp_event_base_t base,
                                         int32_t event_id, void* event_data) {
     SignalKClient* self = static_cast<SignalKClient*>(handler_args);
@@ -274,13 +320,60 @@ void SignalKClient::_handleWebSocketEvent(int32_t event_id, void* event_data) {
 }
 
 void SignalKClient::_handleMessage(const char* data, size_t len) {
-    StaticJsonDocument<768> doc;
+    StaticJsonDocument<1536> doc;
     if (deserializeJson(doc, data, len)) {
         return;
     }
 
     if (doc["updates"].is<JsonArray>()) {
         _processDeltaMessage(doc["updates"].as<JsonArray>());
+    }
+}
+
+static float jsonToFloat(JsonVariantConst value) {
+    if (value.is<float>()) return value.as<float>();
+    if (value.is<double>()) return (float)value.as<double>();
+    if (value.is<int>()) return (float)value.as<int>();
+    return 0.0f;
+}
+
+void SignalKClient::_storeAttitudeObject(JsonObjectConst obj, unsigned long now) {
+    if (obj["pitch"].is<float>() || obj["pitch"].is<double>() || obj["pitch"].is<int>()) {
+        _attitude.pitch_deg = jsonToFloat(obj["pitch"]) * RAD_TO_DEG_F;
+        _attitude.pitch_valid = true;
+        _attitude.last_update = now;
+    }
+    if (obj["roll"].is<float>() || obj["roll"].is<double>() || obj["roll"].is<int>()) {
+        _attitude.roll_deg = jsonToFloat(obj["roll"]) * RAD_TO_DEG_F;
+        _attitude.roll_valid = true;
+        _attitude.last_update = now;
+    }
+    if (obj["yaw"].is<float>() || obj["yaw"].is<double>() || obj["yaw"].is<int>()) {
+        _attitude.yaw_deg = normalizeAngle(jsonToFloat(obj["yaw"]) * RAD_TO_DEG_F);
+        _attitude.yaw_valid = true;
+        _attitude.last_update = now;
+    }
+}
+
+static double jsonToDouble(JsonVariantConst value) {
+    if (value.is<double>()) return value.as<double>();
+    if (value.is<float>()) return (double)value.as<float>();
+    if (value.is<int>()) return (double)value.as<int>();
+    return 0.0;
+}
+
+void SignalKClient::_storePositionObject(JsonObjectConst obj, unsigned long now) {
+    if (obj["latitude"].is<double>() || obj["latitude"].is<float>() || obj["latitude"].is<int>() ||
+        obj["latitude"].is<long>()) {
+        _position.latitude = jsonToDouble(obj["latitude"]);
+        _position.valid = true;
+        _position.last_update = now;
+    }
+    if (obj["longitude"].is<double>() || obj["longitude"].is<float>() || obj["longitude"].is<int>() ||
+        obj["longitude"].is<long>()) {
+        _position.longitude = jsonToDouble(obj["longitude"]);
+        _position.valid = true;
+        _position.last_update = now;
     }
 }
 
@@ -294,6 +387,22 @@ void SignalKClient::_processDeltaMessage(JsonArray updates) {
 
             const char* path = value_obj["path"];
             JsonVariant value = value_obj["value"];
+
+            if (strcmp(path, SK_PATH_ATTITUDE) == 0 && value.is<JsonObject>()) {
+                if (xSemaphoreTake(_data_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    _storeAttitudeObject(value.as<JsonObject>(), millis());
+                    xSemaphoreGive(_data_mutex);
+                }
+                continue;
+            }
+
+            if (strcmp(path, SK_PATH_NAVIGATION_POSITION) == 0 && value.is<JsonObject>()) {
+                if (xSemaphoreTake(_data_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    _storePositionObject(value.as<JsonObject>(), millis());
+                    xSemaphoreGive(_data_mutex);
+                }
+                continue;
+            }
 
             if (!(value.is<float>() || value.is<double>() || value.is<int>())) {
                 continue;
@@ -344,6 +453,9 @@ void SignalKClient::_storePathValue(const char* path, float value) {
         _wind.heading_degrees = normalizeAngle(value * RAD_TO_DEG_F);
         _wind.heading_valid = true;
         _wind.last_update = now;
+        _attitude.yaw_deg = _wind.heading_degrees;
+        _attitude.yaw_valid = true;
+        _attitude.last_update = now;
     } else if (strcmp(path, "navigation.speedOverGround") == 0) {
         _wind.sog_knots = value * MS_TO_KNOTS;
         _wind.sog_valid = true;
@@ -372,6 +484,26 @@ void SignalKClient::_storePathValue(const char* path, float value) {
         _energy.battery_soc_pct = (value <= 1.0f) ? value * 100.0f : value;
         _energy.battery_soc_valid = true;
         _energy.last_update = now;
+    } else if (strcmp(path, SK_PATH_CABIN_TEMPERATURE) == 0) {
+        _environment.temperature_c = (value > 200.0f) ? (value - 273.15f) : value;
+        _environment.temperature_valid = true;
+        _environment.last_update = now;
+    } else if (strcmp(path, SK_PATH_OUTSIDE_PRESSURE) == 0) {
+        _environment.pressure_hpa = (value > 2000.0f) ? (value / 100.0f) : value;
+        _environment.pressure_valid = true;
+        _environment.last_update = now;
+    } else if (strcmp(path, SK_PATH_ATTITUDE_PITCH) == 0) {
+        _attitude.pitch_deg = value * RAD_TO_DEG_F;
+        _attitude.pitch_valid = true;
+        _attitude.last_update = now;
+    } else if (strcmp(path, SK_PATH_ATTITUDE_ROLL) == 0) {
+        _attitude.roll_deg = value * RAD_TO_DEG_F;
+        _attitude.roll_valid = true;
+        _attitude.last_update = now;
+    } else if (strcmp(path, SK_PATH_ATTITUDE_YAW) == 0) {
+        _attitude.yaw_deg = normalizeAngle(value * RAD_TO_DEG_F);
+        _attitude.yaw_valid = true;
+        _attitude.last_update = now;
     }
 
     xSemaphoreGive(_data_mutex);
@@ -382,7 +514,7 @@ void SignalKClient::_sendSubscription() {
         return;
     }
 
-    StaticJsonDocument<1536> doc;
+    StaticJsonDocument<2048> doc;
     doc["context"] = "vessels.self";
 
     JsonArray subscribe = doc["subscribe"].to<JsonArray>();
@@ -393,7 +525,7 @@ void SignalKClient::_sendSubscription() {
         sub["minPeriod"] = SIGNALK_MIN_SUBSCRIPTION_PERIOD_MS;
     }
 
-    char json[1024];
+    char json[1536];
     size_t len = serializeJson(doc, json, sizeof(json));
     if (len == 0) {
         Serial.println("[SIGNALK] ERROR: Subscription JSON serialize failed");

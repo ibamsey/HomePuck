@@ -3,6 +3,9 @@
 #include "wind_widget.h"
 #include "sog_speedometer_screen.h"
 #include "energy_flow_screen.h"
+#include "bme_env_screen.h"
+#include "attitude_screen.h"
+#include "anchor_watch_screen.h"
 #include <math.h>
 
 static WindWidget s_windWidget;
@@ -43,14 +46,24 @@ static bool windScreenDataChanged(const WindData& wind, bool stale, uint8_t vari
 }
 
 bool userScreenDataChanged(UserScreenMode mode, const WindData& wind, bool wind_stale,
-                           const EnergyData& energy, bool energy_stale, uint8_t variation) {
+                           const EnergyData& energy, bool energy_stale,
+                           const EnvironmentData& environment, bool environment_stale,
+                           const AttitudeData& attitude, bool attitude_stale,
+                           const PositionData& position, bool position_stale,
+                           uint8_t variation, unsigned long now_ms) {
     switch (mode) {
         case USER_SCREEN_WIND:
             return windScreenDataChanged(wind, wind_stale, variation);
         case USER_SCREEN_SOG:
             return sogSpeedometerDataChanged(wind, wind_stale);
         case USER_SCREEN_ENERGY:
-            return energyFlowDataChanged(energy, energy_stale);
+            return energyFlowDataChanged(energy, energy_stale, now_ms);
+        case USER_SCREEN_BME:
+            return bmeEnvScreenDataChanged(environment, environment_stale);
+        case USER_SCREEN_ATTITUDE:
+            return attitudeScreenDataChanged(attitude, attitude_stale);
+        case USER_SCREEN_ANCHOR:
+            return anchorWatchScreenDataChanged(position, position_stale);
         default:
             return false;
     }
@@ -74,10 +87,28 @@ static void drawEnergyFlow(const UserScreenDrawContext& ctx) {
     energyFlowScreenDraw(ctx.display, ctx.update_kind, *ctx.energy, ctx.energy_stale, ctx.now_ms);
 }
 
+static void drawBmeEnv(const UserScreenDrawContext& ctx) {
+    if (!ctx.environment) return;
+    bmeEnvScreenDraw(ctx.display, ctx.update_kind, *ctx.environment, ctx.environment_stale, ctx.now_ms);
+}
+
+static void drawAttitude(const UserScreenDrawContext& ctx) {
+    if (!ctx.attitude) return;
+    attitudeScreenDraw(ctx.display, ctx.update_kind, *ctx.attitude, ctx.attitude_stale, ctx.now_ms);
+}
+
+static void drawAnchorWatch(const UserScreenDrawContext& ctx) {
+    if (!ctx.position) return;
+    anchorWatchScreenDraw(ctx.display, ctx.update_kind, *ctx.position, ctx.position_stale, ctx.now_ms);
+}
+
 static const UserScreenDescriptor kUserScreens[] = {
-    { USER_SCREEN_WIND,   "Wind",   USER_SCREEN_WIND_VARIATIONS,   true,  false, drawWindScreen },
-    { USER_SCREEN_SOG,    "SOG",    USER_SCREEN_SOG_VARIATIONS,    true,  false, drawSogSpeedometer },
-    { USER_SCREEN_ENERGY, "Energy", USER_SCREEN_ENERGY_VARIATIONS, false, true,  drawEnergyFlow },
+    { USER_SCREEN_WIND,     "Wind",     USER_SCREEN_WIND_VARIATIONS,     true,  false, false, false, false, false, drawWindScreen },
+    { USER_SCREEN_SOG,      "SOG",      USER_SCREEN_SOG_VARIATIONS,      true,  false, false, false, false, false, drawSogSpeedometer },
+    { USER_SCREEN_ENERGY,   "Energy",   USER_SCREEN_ENERGY_VARIATIONS,   false, true,  false, false, false, false, drawEnergyFlow },
+    { USER_SCREEN_BME,      "BME",      USER_SCREEN_BME_VARIATIONS,      false, false, true,  false, false, false, drawBmeEnv },
+    { USER_SCREEN_ATTITUDE, "Attitude", USER_SCREEN_ATTITUDE_VARIATIONS, false, false, false, true,  false, false, drawAttitude },
+    { USER_SCREEN_ANCHOR,   "Anchor",   USER_SCREEN_ANCHOR_VARIATIONS, false, false, false, false, true,  true,  drawAnchorWatch },
 };
 
 static const size_t kUserScreenCount = sizeof(kUserScreens) / sizeof(kUserScreens[0]);

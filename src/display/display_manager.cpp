@@ -1,5 +1,6 @@
 #include "display_manager.h"
 #include "display_compositor.h"
+#include "anchor_watch_screen.h"
 #include "LGFX_config.h"
 #include "config.h"
 
@@ -89,6 +90,9 @@ void DisplayManager::showStatus(DisplayConnectionState state, const char* detail
 
 DisplayUpdateKind DisplayManager::classifyUpdate(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
                                                  const EnergyData& energy, bool energy_stale,
+                                                 const EnvironmentData& environment, bool environment_stale,
+                                                 const AttitudeData& attitude, bool attitude_stale,
+                                                 const PositionData& position, bool position_stale,
                                                  DisplayConnectionState connState) {
     bool badgeVisible = connectionBadgeVisible(connState);
     bool needsBadge = (_lastConnState != connState) || (_lastBadgeVisible != badgeVisible);
@@ -98,9 +102,13 @@ DisplayUpdateKind DisplayManager::classifyUpdate(const UserScreenDescriptor* des
                      (_lastVariation != _nav.variation[_nav.mode]);
 
     bool needsPartial = false;
-    if (desc && (desc->needs_wind_data || desc->needs_energy_data)) {
+    if (desc && (desc->needs_wind_data || desc->needs_energy_data || desc->needs_environment_data ||
+                 desc->needs_attitude_data || desc->needs_position_data)) {
         needsPartial = userScreenDataChanged(_nav.mode, wind, wind_stale, energy, energy_stale,
-                                             _nav.variation[_nav.mode]);
+                                             environment, environment_stale,
+                                             attitude, attitude_stale,
+                                             position, position_stale,
+                                             _nav.variation[_nav.mode], millis());
     }
 
     if (!needsFull && !needsPartial && !needsBadge) {
@@ -117,13 +125,19 @@ DisplayUpdateKind DisplayManager::classifyUpdate(const UserScreenDescriptor* des
 
 void DisplayManager::updateUserScreen(const WindData& wind, bool wind_stale,
                                       const EnergyData& energy, bool energy_stale,
+                                      const EnvironmentData& environment, bool environment_stale,
+                                      const AttitudeData& attitude, bool attitude_stale,
+                                      const PositionData& position, bool position_stale,
                                       DisplayConnectionState connState) {
     if (!_ready) return;
 
     const UserScreenDescriptor* desc = _nav.currentDescriptor();
     if (!desc) return;
 
-    DisplayUpdateKind kind = classifyUpdate(desc, wind, wind_stale, energy, energy_stale, connState);
+    DisplayUpdateKind kind = classifyUpdate(desc, wind, wind_stale, energy, energy_stale,
+                                            environment, environment_stale,
+                                            attitude, attitude_stale,
+                                            position, position_stale, connState);
     if (kind == DisplayUpdateKind::None) {
         return;
     }
@@ -157,6 +171,12 @@ void DisplayManager::updateUserScreen(const WindData& wind, bool wind_stale,
         wind_stale,
         desc->needs_energy_data ? &energy : nullptr,
         energy_stale,
+        desc->needs_environment_data ? &environment : nullptr,
+        environment_stale,
+        desc->needs_attitude_data ? &attitude : nullptr,
+        attitude_stale,
+        desc->needs_position_data ? &position : nullptr,
+        position_stale,
         _nav.variation[desc->mode],
         millis()
     };
@@ -185,6 +205,18 @@ void DisplayManager::navigateMode(int delta) {
 void DisplayManager::navigateVariation(int delta) {
     _nav.cycleVariation(delta);
     _forceRedraw = true;
+}
+
+bool DisplayManager::handleScreenTap(const PositionData& position) {
+    const UserScreenDescriptor* desc = _nav.currentDescriptor();
+    if (!desc || !desc->handles_tap) return false;
+
+    if (_nav.mode == USER_SCREEN_ANCHOR) {
+        if (!anchorWatchScreenZero(position)) return false;
+        _forceRedraw = true;
+        return true;
+    }
+    return false;
 }
 
 const char* DisplayManager::getScreenDebugName() const {

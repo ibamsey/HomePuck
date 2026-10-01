@@ -11,6 +11,9 @@
 #include <freertos/semphr.h>
 #include "config.h"
 #include "energy_data.h"
+#include "environment_data.h"
+#include "attitude_data.h"
+#include "position_data.h"
 
 enum SignalKState {
     SK_DISCONNECTED = 0,
@@ -96,6 +99,12 @@ public:
     bool isWindDataStale() const;
     EnergyData getEnergyData();
     bool isEnergyDataStale() const;
+    EnvironmentData getEnvironmentData();
+    bool isEnvironmentDataStale() const;
+    AttitudeData getAttitudeData();
+    bool isAttitudeDataStale() const;
+    PositionData getPositionData();
+    bool isPositionDataStale() const;
 
     void onDataReceived(SignalKDataCallback cb) { _data_callback = cb; }
     void onStateChange(SignalKStateCallback cb) { _state_callback = cb; }
@@ -120,6 +129,9 @@ private:
     SemaphoreHandle_t _data_mutex;
     WindData _wind;
     EnergyData _energy;
+    EnvironmentData _environment;
+    AttitudeData _attitude;
+    PositionData _position;
 
     SignalKDataCallback _data_callback;
     SignalKStateCallback _state_callback;
@@ -136,6 +148,8 @@ private:
     void _handleErrorRecovery();
     void _checkConnectionHealth();
     void _storePathValue(const char* path, float value);
+    void _storeAttitudeObject(JsonObjectConst obj, unsigned long now);
+    void _storePositionObject(JsonObjectConst obj, unsigned long now);
 
     static void _staticEventHandler(void* handler_args, esp_event_base_t base,
                                     int32_t event_id, void* event_data);

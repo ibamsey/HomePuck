@@ -8,6 +8,6 @@
 
 void energyFlowScreenDraw(LGFX& display, DisplayUpdateKind kind, const EnergyData& energy, bool stale,
                           unsigned long now_ms);
-bool energyFlowDataChanged(const EnergyData& energy, bool stale);
+bool energyFlowDataChanged(const EnergyData& energy, bool stale, unsigned long now_ms);
 
 #endif // ENERGY_FLOW_SCREEN_H

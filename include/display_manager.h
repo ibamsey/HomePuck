@@ -12,9 +12,13 @@ public:
     void showStatus(DisplayConnectionState state, const char* detail = "");
     void updateUserScreen(const WindData& wind, bool wind_stale,
                           const EnergyData& energy, bool energy_stale,
+                          const EnvironmentData& environment, bool environment_stale,
+                          const AttitudeData& attitude, bool attitude_stale,
+                          const PositionData& position, bool position_stale,
                           DisplayConnectionState connState);
     void navigateMode(int delta);
     void navigateVariation(int delta);
+    bool handleScreenTap(const PositionData& position);
     bool isUserScreenActive() const { return _userScreenActive; }
     UserScreenMode getScreenMode() const { return _nav.mode; }
     uint8_t getVariation() const { return _nav.variation[_nav.mode]; }
@@ -33,6 +37,9 @@ private:
     void drawHeader(const char* title, uint16_t color);
     DisplayUpdateKind classifyUpdate(const UserScreenDescriptor* desc, const WindData& wind, bool wind_stale,
                                      const EnergyData& energy, bool energy_stale,
+                                     const EnvironmentData& environment, bool environment_stale,
+                                     const AttitudeData& attitude, bool attitude_stale,
+                                     const PositionData& position, bool position_stale,
                                      DisplayConnectionState connState);
 };
 

@@ -6,6 +6,7 @@
 #include "wifi_manager.h"
 #include "signalk_client.h"
 #include "display_manager.h"
+#include "user_screens.h"
 
 static CST816S touch(PIN_TP_SDA, PIN_TP_SCL, PIN_TP_RST, PIN_TP_INT);
 
@@ -14,6 +15,8 @@ static bool signalk_connect_pending = false;
 static unsigned long signalk_connect_at_ms = 0;
 static unsigned long last_display_update_ms = 0;
 static unsigned long last_touch_ms = 0;
+static unsigned long last_anchor_tap_ms = 0;
+static unsigned long last_anchor_single_tap_ms = 0;
 
 static DisplayConnectionState mapConnectionState() {
     if (!wifiManager.isConnected()) {
@@ -32,10 +35,19 @@ static DisplayConnectionState mapConnectionState() {
 static void updateUserDisplay() {
     WindData wind = signalkClient.getWindData();
     EnergyData energy = signalkClient.getEnergyData();
+    EnvironmentData environment = signalkClient.getEnvironmentData();
+    AttitudeData attitude = signalkClient.getAttitudeData();
+    PositionData position = signalkClient.getPositionData();
     DisplayConnectionState conn = mapConnectionState();
     bool wind_stale = signalkClient.isWindDataStale();
     bool energy_stale = signalkClient.isEnergyDataStale();
-    displayManager.updateUserScreen(wind, wind_stale, energy, energy_stale, conn);
+    bool environment_stale = signalkClient.isEnvironmentDataStale();
+    bool attitude_stale = signalkClient.isAttitudeDataStale();
+    bool position_stale = signalkClient.isPositionDataStale();
+    displayManager.updateUserScreen(wind, wind_stale, energy, energy_stale,
+                                    environment, environment_stale,
+                                    attitude, attitude_stale,
+                                    position, position_stale, conn);
 }
 
 static void onWiFiStateChange(WiFiConnectionState state, const char* message) {
@@ -114,6 +126,7 @@ static bool touch_ready = false;
 static void initTouch() {
     touch.begin();
     touch.disable_auto_sleep();
+    touch.enable_double_click();
     touch_ready = true;
     Serial.printf("[TOUCH] CST816S ready (I2C SDA=%d SCL=%d), fw %u.%u.%u\n",
                   PIN_TP_SDA, PIN_TP_SCL,
@@ -122,12 +135,81 @@ static void initTouch() {
                   touch.data.versionInfo[2]);
 }
 
+static bool isAnchorTapPulse() {
+    byte gesture = touch.data.gestureID;
+    if (gesture == SINGLE_CLICK) {
+        return true;
+    }
+    // CST816S often reports taps as finger-up with gesture NONE.
+    if (gesture == NONE && touch.data.event == 1) {
+        return true;
+    }
+    return false;
+}
+
+static bool isAnchorDoubleTapEvent(unsigned long now) {
+    if (touch.data.gestureID == DOUBLE_CLICK) {
+        last_anchor_single_tap_ms = 0;
+        return true;
+    }
+
+    if (!isAnchorTapPulse()) {
+        return false;
+    }
+
+    if (last_anchor_single_tap_ms != 0 &&
+        (now - last_anchor_single_tap_ms) <= ANCHOR_DOUBLE_TAP_WINDOW_MS) {
+        last_anchor_single_tap_ms = 0;
+        return true;
+    }
+
+    last_anchor_single_tap_ms = now;
+    return false;
+}
+
+static void handleAnchorTap(unsigned long now) {
+    if (now - last_anchor_tap_ms < ANCHOR_TAP_DEBOUNCE_MS) {
+        return;
+    }
+
+    const UserScreenDescriptor* desc = userScreenDescriptor(displayManager.getScreenMode());
+    if (!desc || !desc->handles_tap) {
+        return;
+    }
+
+    PositionData position = signalkClient.getPositionData();
+    if (!position.valid) {
+        Serial.println("[APP] Anchor tap ignored - no GPS fix");
+        return;
+    }
+
+    if (displayManager.handleScreenTap(position)) {
+        last_anchor_tap_ms = now;
+        last_anchor_single_tap_ms = 0;
+        last_touch_ms = now;
+        updateUserDisplay();
+        Serial.printf("[APP] Anchor double-tap zero lat=%.6f lon=%.6f (gesture=%u event=%u)\n",
+                      position.latitude, position.longitude,
+                      (unsigned)touch.data.gestureID, (unsigned)touch.data.event);
+    }
+}
+
 static void handleTouch() {
     if (!touch_ready) return;
     if (!displayManager.isUserScreenActive()) return;
     if (!touch.available()) return;
 
     unsigned long now = millis();
+
+    if (displayManager.getScreenMode() == USER_SCREEN_ANCHOR) {
+        if (isAnchorDoubleTapEvent(now)) {
+            handleAnchorTap(now);
+        }
+        return;
+    }
+
+    last_anchor_single_tap_ms = 0;
+
     if (now - last_touch_ms < TOUCH_GESTURE_DEBOUNCE_MS) return;
 
     int delta_mode = 0;
